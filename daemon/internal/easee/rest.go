@@ -114,15 +114,25 @@ func (c *Client) ResumeCharging(ctx context.Context, chargerID string) error {
 }
 
 // SetDynamicCurrent setzt das dynamische Strom-Limit (A) - der Hebel, ueber
-// den Loxones Lastmanagement die Ladeleistung steuert. Wird symmetrisch auf
-// alle 3 Phasen angewandt (siehe Plan-Datei fuer die v1-Annahme "ein Charger
-// = ein eigener Circuit"). Feldnamen (currentP1/P2/P3) verifiziert gegen
-// pyeasee/charger.py's set_dynamic_charger_current().
+// den Loxones Lastmanagement die Ladeleistung steuert.
+//
+// KORRIGIERT 2026-09-07 (Bug gefunden beim Live-Debugging: Wert kam im
+// MQTT-Log korrekt an, in der Easee-App blieb das Limit aber bei 0). Ursache:
+// {currentP1,currentP2,currentP3} ist das Body-Schema des CIRCUIT-Endpoints
+// (set_dynamic_charger_circuit_current, Site-/Circuit-Ebene fuer mehrere
+// Boxen an einem Circuit). Der hier aufgerufene CHARGER-Endpoint
+// (.../chargers/{id}/commands/set_dynamic_charger_current) erwartet
+// stattdessen {"amps": int, "minutes": int} - verifiziert gegen
+// pyeasee/charger.py (nordicopen/pyeasee, set_dynamic_charger_current()) UND
+// die offizielle Referenz developer.easee.com/reference/
+// charger_set_dynamic_charger_current. Mit den falschen Feldnamen nahm die
+// Easee-Cloud den Request ohne HTTP-Fehler an, ignorierte aber die
+// unbekannten Felder - daher kein Fehler im Log, aber wirkungslos.
+// minutes=0 bedeutet "bis zur naechsten Aenderung gueltig" (kein TTL).
 func (c *Client) SetDynamicCurrent(ctx context.Context, chargerID string, amps float64) error {
-	body := map[string]float64{
-		"currentP1": amps,
-		"currentP2": amps,
-		"currentP3": amps,
+	body := map[string]any{
+		"amps":    amps,
+		"minutes": 0,
 	}
 	return c.doJSON(ctx, http.MethodPost, "/chargers/"+chargerID+"/commands/set_dynamic_charger_current", body, nil)
 }

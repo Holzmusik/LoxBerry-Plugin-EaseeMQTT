@@ -829,8 +829,13 @@ function fillConfigForm(c) {
 //   Eingangs EXAKT dem Topic mit Schrägstrichen->Unterstrichen entsprechen.
 // - Loxone -> MQTT (unsere Kommando-Topics) läuft immer per UDP an einen
 //   Virtuellen Ausgang (Adresse /dev/udp/<loxberry>/<Gateway-UDP-In-Port>),
-//   Befehl bei EIN/AUS lautet "publish <topic> <wert>" bzw. mit \v für
-//   Analogwerte.
+//   Befehl bei EIN/AUS lautet "publish <topic> <wert>" bzw. mit Loxones
+//   EIGENEM Wert-Platzhalter <v> für Analogwerte (NICHT \v verwechseln mit
+//   dem \v aus dem Eingangs-Pattern oben - das ist eine andere, eigene
+//   Syntax des Gateway-Plugins für eingehende UDP-Pattern-Erkennung; Loxones
+//   "Virtueller Ausgang Befehl" kennt nur <v>/<v.1>/<v.2>/<v.3>/<v.t> als
+//   Wert-Platzhalter, \v wird dort als literales Vertical-Tab-Steuerzeichen
+//   0x0B interpretiert - realer Bug hier, siehe COMMAND_CATALOG unten).
 // payload/desc = dieselben Erklärungen, die früher in der (jetzt entfernten,
 // redundanten) Kommando-Tabelle auf der Übersicht-Seite standen - hierher
 // verschoben, damit sie nicht verloren gehen.
@@ -941,7 +946,15 @@ function renderLoxoneExport() {
       if (cmd.kind === 'trigger') {
         cmdRows.push('<tr>' + roCell(label, title) + roCell('publish ' + topic + ' 1') + roCell('') + '</tr>');
       } else if (cmd.kind === 'analog') {
-        cmdRows.push('<tr>' + roCell(label, title) + roCell('publish ' + topic + ' \\v') + roCell('') + '</tr>');
+        // Loxones EIGENER Wert-Platzhalter fuer "Virtueller Ausgang Befehl"
+        // ist <v> (bzw. <v.1>/<v.2>/<v.3> fuer Nachkommastellen) - siehe
+        // Loxone-Doku "Virtueller Ausgang Befehl". NICHT \v verwenden: das
+        // wird von Loxones eigener Backslash-Escape-Syntax (wie \r/\x04) als
+        // literales Vertical-Tab-Steuerzeichen (0x0B) interpretiert, nicht
+        // als Wert - genau das war ein realer Bug hier (verifiziert per
+        // Loxone-Monitor-Mitschnitt 2026-09-07: \v erzeugte immer 0x0B statt
+        // des tatsaechlichen Analogwerts, unabhaengig vom Eingangswert).
+        cmdRows.push('<tr>' + roCell(label, title) + roCell('publish ' + topic + ' <v>') + roCell('') + '</tr>');
       } else {
         cmdRows.push('<tr>' + roCell(label, title) + roCell('publish ' + topic + ' 1') + roCell('publish ' + topic + ' 0') + '</tr>');
       }
