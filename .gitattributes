@@ -1,0 +1,3 @@
+# Zielplattform ist LoxBerry (Linux) - Zeilenenden im Repo immer LF, egal
+# mit welchen core.autocrlf-Einstellungen jemand lokal committet.
+* text=auto eol=lf

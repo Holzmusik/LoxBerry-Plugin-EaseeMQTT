@@ -1,0 +1,18 @@
+[Unit]
+Description=Easee-MQTT Bridge (LoxBerry Plugin)
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=EASEEMQTT_CONFIG=/opt/loxberry/config/plugins/easeemqtt/config.json
+ExecStart=/opt/loxberry/bin/plugins/easeemqtt/easeemqtt
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/opt/loxberry/log/plugins/easeemqtt/easeemqtt.log
+StandardError=append:/opt/loxberry/log/plugins/easeemqtt/easeemqtt.log
+User=loxberry
+Group=loxberry
+
+[Install]
+WantedBy=multi-user.target

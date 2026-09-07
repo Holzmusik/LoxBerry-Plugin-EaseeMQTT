@@ -1,0 +1,8 @@
+# Build-Artefakte - nie einchecken (sonst verschachtelt sich beim naechsten
+# Packen ein alter Zip im neuen, siehe KNXtoLOX-Erfahrung).
+*.zip
+
+# Go: go.sum wird bei jedem Install frisch von postroot.sh via "go mod tidy"
+# erzeugt (siehe README) - bewusst nicht eingecheckt, da hier lokal nie ein
+# echter Go-Build moeglich war, um es zu verifizieren.
+daemon/go.sum
