@@ -7,10 +7,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"easeemqtt/internal/bridge"
@@ -18,8 +21,43 @@ import (
 	"easeemqtt/internal/easee"
 )
 
+// runCrypto bedient "easeemqtt encrypt <config-pfad>" / "easeemqtt decrypt
+// <config-pfad>" - liest den zu (ent-)schluesselnden Wert von STDIN statt als
+// Kommandozeilenargument, damit ein Passwort nie kurzzeitig in der
+// Prozessliste (ps aux) sichtbar wird. api.cgi ruft dies als Subprocess auf,
+// damit die eigentliche Kryptografie an EINER Stelle (hier, mit Gos
+// Standardbibliothek) lebt statt zusaetzlich in Perl dupliziert zu werden.
+func runCrypto(mode, cfgPath string) {
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimRight(input, "\r\n")
+
+	var out string
+	var err error
+	switch mode {
+	case "encrypt":
+		out, err = config.Encrypt(cfgPath, input)
+	case "decrypt":
+		var ok bool
+		out, ok = config.Decrypt(cfgPath, input)
+		if !ok {
+			err = fmt.Errorf("kein gueltiges Chiffrat")
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "easeemqtt "+mode+": "+err.Error())
+		os.Exit(1)
+	}
+	fmt.Println(out)
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags)
+
+	if len(os.Args) >= 3 && (os.Args[1] == "encrypt" || os.Args[1] == "decrypt") {
+		runCrypto(os.Args[1], os.Args[2])
+		return
+	}
 
 	cfgPath := os.Getenv("EASEEMQTT_CONFIG")
 	if cfgPath == "" {

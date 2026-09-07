@@ -1,20 +1,15 @@
 # LoxBerry-Plugin-EaseeMQTT
 
-Reine Protokollbrücke zwischen Easee-Wallboxen (beliebig viele, nicht fest
-auf eine Anzahl begrenzt) und MQTT, für LoxBerry. Lastmanagement/
-Entscheidungslogik bleibt **komplett extern** (z.B. in Loxone) - dieser
+Reine Protokollbrücke zwischen Easee-Wallboxen und MQTT, für LoxBerry. 
+Lastmanagement/Entscheidungslogik bleibt **komplett extern** (z.B. in Loxone) - dieser
 Dienst übersetzt nur 1:1 zwischen Easees Cloud-API und MQTT, ohne eigene
 Logik.
 
 ## Architektur
 
 ```
-Easee Cloud (SignalR-Push + REST) <-> easeemqtt (Go, systemd: easeemqtt.service) <-> MQTT-Broker <-> Loxone (native MQTT)
+Easee Cloud (SignalR-Push + REST) <-> easeemqtt (Go, systemd: easeemqtt.service) <-> MQTT-Broker <-> Loxone
 ```
-
-Nur ein einziger Dienst nötig: Loxone spricht MQTT nativ (Miniserver Gen2)
-und verbindet sich direkt mit dem Broker.
-
 Der Go-Daemon (`daemon/`, aus dem mitgelieferten Quellcode gebaut, kein
 externer `git clone` nötig):
 
@@ -114,6 +109,16 @@ Checkbox-Liste mit vorausgewähltem Basis-Setup). Fehlt der Schlüssel
 komplett (z.B. eine sehr alte `config.json`), publiziert der Daemon
 sicherheitshalber alles statt versehentlich nichts.
 
+**Passwörter** (`easee.password`, `mqtt.password`) liegen verschlüsselt vor
+(AES-256-GCM, Go-Standardbibliothek). Der Schlüssel wird bei der ersten
+Nutzung zufällig erzeugt und liegt lokal neben `config.json` (`secret.key`,
+Dateimodus 600) - er ist nicht Teil dieses Repos und wird nicht gesichert.
+Das schützt vor versehentlicher Weitergabe nur der `config.json` (Screenshot,
+Support-Anfrage, Backup ohne den Schlüssel), nicht vor jemandem mit vollem
+Zugriff auf den Config-Ordner selbst. Die Web-UI zeigt gespeicherte
+Passwörter nie im Klartext an - ein leer gelassenes Passwortfeld behält beim
+Speichern automatisch den bestehenden Wert.
+
 ## Web-UI
 
 Single-Page-App (`webfrontend/htmlauth/index.cgi` + `api.cgi`). Seiten:
@@ -181,7 +186,6 @@ JSON-Aufteilung entfällt komplett.
 - `current_t2..t5`/`in_volt_t*_t*` -> L1/L2/L3-Zuordnung ist nicht final
   verifiziert (siehe Hinweis oben) - Easees eigene Terminal-Benennung wird
   bewusst unverändert übernommen.
-- Easee-Passwort liegt im Klartext in `config.json`.
 - Der `streams.easee.com`-SignalR-Endpunkt wurde in einem öffentlichen
   GitHub-Thread im Zusammenhang mit einem IP-Ratelimit ("Blackhole")
   genannt - der Daemon verwendet deshalb bewusst moderates Backoff statt

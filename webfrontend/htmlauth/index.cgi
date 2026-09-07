@@ -421,7 +421,7 @@ let FOUND_CHARGERS = [];
 // Build-Marker: von Hand hochzählen bei relevanten Änderungen - gleiche
 // Debug-Infrastruktur wie KNXtoLOX (dort entscheidend fürs schnelle
 // Fehler-Isolieren auf echter Hardware).
-const UI_BUILD = '2026-09-07-15';
+const UI_BUILD = '2026-09-07-16';
 console.log('[EaseeMQTT] index.cgi UI_BUILD=' + UI_BUILD);
 
 const CLIENT_LOG = [];
@@ -784,7 +784,13 @@ function currentConfigForm() {
 function fillConfigForm(c) {
   const e = c.easee || {};
   document.getElementById('easee_username').value = e.username || '';
-  document.getElementById('easee_password').value = e.password || '';
+  // Passwoerter kommen vom Server nie mehr im Klartext zurueck (liegen
+  // verschluesselt in config.json) - Feld bleibt leer, "password_set"
+  // steuert nur den Platzhaltertext. Leer lassen beim Speichern = Server
+  // behaelt den bestehenden (verschluesselten) Wert bei, siehe api.cgi's
+  // save_config().
+  document.getElementById('easee_password').value = '';
+  document.getElementById('easee_password').placeholder = e.password_set ? 'gespeichert - leer lassen zum Beibehalten' : '';
   CHARGER_ROWS = e.chargers || [];
   renderChargerTable();
 
@@ -793,7 +799,8 @@ function fillConfigForm(c) {
   document.getElementById('mqtt_host').value = m.host || '';
   document.getElementById('mqtt_port').value = m.port || 1883;
   document.getElementById('mqtt_username').value = m.username || '';
-  document.getElementById('mqtt_password').value = m.password || '';
+  document.getElementById('mqtt_password').value = '';
+  document.getElementById('mqtt_password').placeholder = m.password_set ? 'gespeichert - leer lassen zum Beibehalten' : '';
   document.getElementById('topic_prefix').value = m.topic_prefix || 'easee/';
   document.getElementById('client_id').value = m.client_id || 'easeemqtt';
   document.getElementById('local-broker-info').textContent = 'MQTT-Broker (aus LoxBerry): ' + (c.local_broker_info || 'nicht konfiguriert');
@@ -805,31 +812,7 @@ function fillConfigForm(c) {
   SELECTED_OBS = new Set(Array.isArray(m.enabled_observations) ? m.enabled_observations : obsBasicIds());
   renderObsList();
 
-  renderTopicExamples(m.topic_prefix || 'easee/', CHARGER_ROWS);
   renderLoxoneExport();
-}
-
-// Zeigt die tatsächlich konfigurierten Prefix+Charger-IDs auf der
-// Übersicht-Seite, damit man die vollständigen Topic-Pfade nicht erst aus
-// Platzhaltern ("<prefix><charger_id>/...") zusammenbauen muss - direkte
-// Antwort auf "wo sehe ich die Befehle, die ich senden kann".
-function renderTopicExamples(prefix, chargers) {
-  const el = document.getElementById('topic-examples');
-  if (!el) return;
-  if (!chargers || chargers.length === 0) {
-    el.textContent = 'Noch keine Wallbox konfiguriert - siehe "Konto & Wallboxen".';
-    return;
-  }
-  el.innerHTML = chargers.map(c => {
-    const id = (c.id || '').replace(/</g, '&lt;');
-    const name = c.name ? ' (' + c.name.replace(/</g, '&lt;') + ')' : '';
-    return '<div style="margin-bottom:6px">' +
-      '<strong>' + id + '</strong>' + name + '<br>' +
-      '<span class="mono" style="font-size:12px">' + prefix + id + '/state/opmode</span> ... , ' +
-      '<span class="mono" style="font-size:12px">' + prefix + id + '/cmd/start</span>, ' +
-      '<span class="mono" style="font-size:12px">' + prefix + id + '/set/dynamic_current</span> ...' +
-    '</div>';
-  }).join('');
 }
 
 // -- Loxone-Import: fertige Copy-Paste-Strings für LoxBerrys MQTT-Gateway --

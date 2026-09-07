@@ -68,6 +68,21 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("config.json ist kein gueltiges JSON (%s): %w", path, err)
 	}
+
+	// Passwoerter liegen in config.json verschluesselt (siehe crypto.go) -
+	// hier entschluesseln. Faellt Decrypt() auf einen Wert zurueck, der kein
+	// gueltiges Chiffrat ist, wird er unveraendert als Klartext behandelt -
+	// deckt den Uebergang von vor Einfuehrung dieser Verschluesselung bereits
+	// bestehenden config.json-Dateien ab (dort steht noch echter Klartext),
+	// ohne den Dienst dadurch zu brechen. Nach dem naechsten Speichern in der
+	// Web-UI liegt der Wert dann verschluesselt vor.
+	if plain, ok := Decrypt(path, c.Easee.Password); ok {
+		c.Easee.Password = plain
+	}
+	if plain, ok := Decrypt(path, c.MQTT.Password); ok {
+		c.MQTT.Password = plain
+	}
+
 	if c.Easee.Username == "" || c.Easee.Password == "" {
 		return nil, fmt.Errorf("config.json: easee.username/password sind leer - bitte in der Web-UI konfigurieren")
 	}

@@ -33,6 +33,40 @@ sub run_capture {
     return ($rc, $output);
 }
 
+# Wie run_capture(), sendet aber zusaetzlich $stdin_text auf STDIN des
+# Kindprozesses - fuer encrypt_secret()/decrypt_secret() (siehe unten), damit
+# ein Passwort NICHT als Kommandozeilenargument uebergeben werden muss (sonst
+# fuer die Dauer des Aufrufs in der Prozessliste/ps aux sichtbar). Gleiches
+# FD-Umbiege-Muster wie run_capture(), nur um STDIN erweitert - bewusst kein
+# IPC::Open2 o.ae., um keine zusaetzliche Modul-Abhaengigkeit einzufuehren.
+sub run_capture_stdin {
+    my ($cmd_ref, $stdin_text) = @_;
+    my @cmd = @$cmd_ref;
+    my $infile = "/tmp/easeemqtt_stdin_$$.tmp";
+    open(my $ifh, '>', $infile) or return (1, '');
+    chmod 0600, $infile;
+    print $ifh $stdin_text;
+    close $ifh;
+
+    my $capfile = "/tmp/easeemqtt_run_$$.out";
+    open(my $oldin, '<&', \*STDIN) or do { unlink $infile; return (system(@cmd), ''); };
+    open(my $oldout, '>&', \*STDOUT) or do { unlink $infile; return (system(@cmd), ''); };
+    open(my $olderr, '>&', \*STDERR) or do { unlink $infile; return (system(@cmd), ''); };
+    open(STDIN, '<', $infile) or do { unlink $infile; return (system(@cmd), ''); };
+    open(STDOUT, '>', $capfile) or do { unlink $infile; return (system(@cmd), ''); };
+    open(STDERR, '>&', \*STDOUT);
+    my $rc = system(@cmd);
+    open(STDIN, '<&', $oldin);
+    open(STDOUT, '>&', $oldout);
+    open(STDERR, '>&', $olderr);
+    close $oldin; close $oldout; close $olderr;
+    my $output = '';
+    if (open(my $cf, '<', $capfile)) { local $/; $output = <$cf>; close $cf; }
+    unlink $capfile;
+    unlink $infile;
+    return ($rc, $output);
+}
+
 # Eigenes, simples Datei-Logging statt LoxBerry::Log's benannter Methoden -
 # siehe KNXtoLOX/api.cgi für die Begründung (zwei geratene Methodennamen,
 # beide nachweislich falsch). Reines Perl, garantiert lauffähig.
@@ -49,6 +83,7 @@ sub applog {
 my $cfgfile     = "$lbpconfigdir/config.json"; # von easeemqtt (Go-Daemon) DIREKT gelesen - siehe README
 my $enginelogfile = "$lbplogdir/easeemqtt.log";
 my $SERVICE     = 'easeemqtt.service';
+my $EASEEMQTT_BIN = '/opt/loxberry/bin/plugins/easeemqtt/easeemqtt';
 
 print $cgi->header(-type => 'application/json', -charset => 'utf-8', 'Cache-Control' => 'no-store');
 
@@ -82,6 +117,48 @@ sub mqtt_broker_conn {
         user => $m->{Brokeruser} || '',
         pass => $m->{Brokerpass} || '',
     };
+}
+
+# -- Passwort-Verschluesselung -----------------------------------------------
+# Ruft den easeemqtt-Daemon selbst als Subprocess auf ("easeemqtt encrypt/
+# decrypt <config-datei>") statt Krypto in Perl zu duplizieren - die
+# eigentliche AES-256-GCM-Implementierung lebt einmalig in Gos
+# Standardbibliothek (daemon/internal/config/crypto.go), Schluessel liegt
+# lazy neben config.json (secret.key, Modus 0600). Wert wird ueber STDIN
+# uebergeben (run_capture_stdin), nie als Kommandozeilenargument - sonst
+# waere das Passwort kurzzeitig in der Prozessliste sichtbar.
+sub crypto_call {
+    my ($subcmd, $stdin_text) = @_;
+    my ($rc, $out) = run_capture_stdin([$EASEEMQTT_BIN, $subcmd, $cfgfile], $stdin_text);
+    return undef if $rc != 0;
+    $out =~ s/\r?\n\z//;
+    return $out;
+}
+
+# Verschluesselt ein neu eingegebenes Passwort vor dem Schreiben in
+# config.json. Leerer Wert bleibt leer (kein Passwort gesetzt). Schlaegt der
+# Aufruf fehl (z.B. Binary noch nicht gebaut), wird laut und sichtbar
+# gefehlert statt still Klartext zu speichern - das waere schlimmer als ein
+# fehlgeschlagener Speichervorgang.
+sub encrypt_secret {
+    my ($plain) = @_;
+    return '' unless length($plain // '');
+    my $enc = crypto_call('encrypt', $plain);
+    err('Verschluesselung fehlgeschlagen - ist der Dienst korrekt installiert?') unless defined($enc);
+    return $enc;
+}
+
+# Entschluesselt einen gespeicherten Wert NUR fuer den internen
+# Login-Test-Fallback (siehe easee_test/easee_chargers) - wird niemals an den
+# Browser zurueckgegeben. Schlaegt die Entschluesselung fehl (z.B. weil der
+# Wert aus einer aelteren, noch unverschluesselten config.json stammt),
+# unveraendert als moeglichen Klartext zurueckgeben statt hart zu fehlern -
+# gleiche Uebergangs-Logik wie im Go-Daemon (siehe dessen config.go).
+sub decrypt_secret {
+    my ($stored) = @_;
+    return '' unless length($stored // '');
+    my $plain = crypto_call('decrypt', $stored);
+    return defined($plain) ? $plain : $stored;
 }
 
 # -- config.json laden/speichern ---------------------------------------------
@@ -124,21 +201,36 @@ sub save_config {
     $c{easee} = { %{ $CONFIG_DEFAULTS{easee} }, %{ $body->{easee} || {} } };
     $c{mqtt}  = { %{ $CONFIG_DEFAULTS{mqtt} },  %{ $body->{mqtt}  || {} } };
 
+    # Bereits gespeicherte (verschluesselte) Werte laden - fuer "Feld leer
+    # gelassen bedeutet unveraendert" bei den Passwoertern unten.
+    my $existing = load_config();
+
+    # easee.password: leeres Feld = Frontend hat es absichtlich leer
+    # gelassen (siehe index.cgi/fillConfigForm - Passwoerter werden nie an
+    # den Browser zurueckgegeben), bestehenden verschluesselten Wert
+    # behalten. Nicht-leerer Wert = neues Passwort, frisch verschluesseln.
+    if (length($c{easee}{password} // '')) {
+        $c{easee}{password} = encrypt_secret($c{easee}{password});
+    } else {
+        $c{easee}{password} = $existing->{easee}{password} // '';
+    }
+
     # use_local_broker=true: host/port/user/passwort IMMER frisch aus
     # LoxBerrys general.json auflösen und in config.json (die einzige, vom
     # Go-Daemon direkt gelesene Datei) schreiben - der Daemon selbst kennt
     # general.json/LoxBerry-Spezifika nicht, siehe daemon/internal/config.
-    # Gleiches Prinzip wie KNXtoLOX's build_config_yaml(), nur ohne
-    # separate Datei nötig (JSON::PP ist robust genug für diese Struktur,
-    # anders als YAML::Tiny bei KNXtoLOX - siehe dortige Notizen).
     if ($c{mqtt}{use_local_broker}) {
         my $broker = mqtt_broker_conn();
         if ($broker) {
             $c{mqtt}{host} = $broker->{host};
             $c{mqtt}{port} = $broker->{port} + 0;
             $c{mqtt}{username} = $broker->{user};
-            $c{mqtt}{password} = $broker->{pass};
+            $c{mqtt}{password} = encrypt_secret($broker->{pass});
         }
+    } elsif (length($c{mqtt}{password} // '')) {
+        $c{mqtt}{password} = encrypt_secret($c{mqtt}{password});
+    } else {
+        $c{mqtt}{password} = $existing->{mqtt}{password} // '';
     }
 
     open(my $fh, '>', $cfgfile) or err("Konnte config.json nicht schreiben: $!");
@@ -301,6 +393,15 @@ if ($action eq 'config') {
         my $cfg = load_config();
         my $broker = mqtt_broker_conn();
         $cfg->{local_broker_info} = $broker ? "$broker->{host}:$broker->{port}" : '';
+        # Passwoerter (verschluesselt gespeichert) NIE an den Browser
+        # zurueckgeben - nur ob ueberhaupt eines gesetzt ist, damit das
+        # Frontend einen passenden Platzhalter zeigen kann. Leeres Feld beim
+        # naechsten Speichern behaelt den bestehenden Wert (siehe
+        # save_config()).
+        $cfg->{easee}{password_set} = length($cfg->{easee}{password} // '') ? JSON::PP::true : JSON::PP::false;
+        $cfg->{mqtt}{password_set}  = length($cfg->{mqtt}{password}  // '') ? JSON::PP::true : JSON::PP::false;
+        $cfg->{easee}{password} = '';
+        $cfg->{mqtt}{password}  = '';
         out($cfg);
     }
 }
@@ -312,7 +413,7 @@ elsif ($action eq 'easee_test') {
     my $body = read_json_body();
     my $cfg = load_config();
     my $username = length($body->{username} // '') ? $body->{username} : $cfg->{easee}{username};
-    my $password = length($body->{password} // '') ? $body->{password} : $cfg->{easee}{password};
+    my $password = length($body->{password} // '') ? $body->{password} : decrypt_secret($cfg->{easee}{password});
     my ($ok, $token, $error) = easee_login($username, $password);
     out({ ok => JSON::PP::false, error => $error }) unless $ok;
 
@@ -331,7 +432,7 @@ elsif ($action eq 'easee_chargers') {
     my $body = read_json_body();
     my $cfg = load_config();
     my $username = length($body->{username} // '') ? $body->{username} : $cfg->{easee}{username};
-    my $password = length($body->{password} // '') ? $body->{password} : $cfg->{easee}{password};
+    my $password = length($body->{password} // '') ? $body->{password} : decrypt_secret($cfg->{easee}{password});
     my ($ok, $token, $error) = easee_login($username, $password);
     err($error || 'Easee-Login fehlgeschlagen') unless $ok;
 
