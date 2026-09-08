@@ -83,7 +83,14 @@ sub applog {
 my $cfgfile     = "$lbpconfigdir/config.json"; # von easeemqtt (Go-Daemon) DIREKT gelesen - siehe README
 my $enginelogfile = "$lbplogdir/easeemqtt.log";
 my $SERVICE     = 'easeemqtt.service';
-my $EASEEMQTT_BIN = '/opt/loxberry/bin/plugins/easeemqtt/easeemqtt';
+# $lbpbindir kommt dynamisch aus LoxBerry::System (aus dem eigenen Skriptpfad
+# aufgeloest, wie $lbpconfigdir/$lbplogdir oben) - NICHT mehr hart "easeemqtt"
+# verdrahtet. Frueher stand hier "/opt/loxberry/bin/plugins/easeemqtt/...":
+# harmlos, SOLANGE LoxBerry den Plugin-Ordner nie umbenennt, aber genau das
+# kann bei einer Name/Folder-Kollision passieren (siehe postroot.sh) - dann
+# liefe die Web-UI gegen einen anderen Ordner als der tatsaechlich installierte
+# Daemon/dessen Config, mit dem Symptom "Einstellungen nach Update weg".
+my $EASEEMQTT_BIN = "$lbpbindir/easeemqtt";
 
 print $cgi->header(-type => 'application/json', -charset => 'utf-8', 'Cache-Control' => 'no-store');
 

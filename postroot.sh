@@ -1,6 +1,26 @@
 #!/bin/bash
 # postroot.sh wird bei Installation/Update mit Root-Rechten ausgefuehrt.
-# Parameter, die LoxBerry uebergibt: $1=TempFolder $2=Version $3=Base $4=PluginName $5=... (siehe LoxBerry SDK)
+# Echte Parameterreihenfolge, verifiziert gegen den echten LoxBerry-Core-
+# Quellcode (mschlenstedt/Loxberry, sbin/plugininstall.pl - Aufruf:
+# "$script" "$tempfile" "$pname" "$pfolder" "$pversion" "$lbhomedir"
+# "$tempfolder"), NICHT geraten:
+#   $1=tempfile (Zufallsname der Upload-Session) $2=pname $3=pfolder
+#   $4=pversion $5=lbhomedir (z.B. /opt/loxberry) $6=tempfolder (entpackter
+#   Plugin-Quellcode)
+# WICHTIG: $3 (pfolder) ist NICHT garantiert "easeemqtt" - LoxBerry haengt
+# bei einem Name/Folder-Kollisions-Fall (siehe PluginDB.pm _calculate_md5,
+# das Autor+Name+Folder hasht) automatisch 3 Zeichen einer neuen md5 an
+# Name UND Folder an. Deshalb werden unten NICHT mehr "easeemqtt" fest
+# verdrahtet, sondern LoxBerrys eigene REPLACELBP*-Platzhalter genutzt
+# (von plugininstall.pl VOR postroot.sh per replaceenv()/sed automatisch
+# durch die echten, aktuellen Pfade ersetzt - selbes Muster, das
+# templates/system/etc/systemd/system/easeemqtt.service jetzt auch nutzt).
+# Vorher war hier ueberall "easeemqtt" hart hinterlegt - harmlos, SOLANGE
+# der Ordnername nie wechselt, aber genau das war vermutlich die Ursache
+# dafuer, dass nach einem Update alle gespeicherten Einstellungen weg
+# waren: Web-UI (api.cgi, loest $lbpconfigdir dynamisch aus dem eigenen
+# Skriptpfad auf) und Daemon/postroot.sh (hart "easeemqtt") liefen dann
+# gegen ZWEI VERSCHIEDENE Config-Verzeichnisse.
 
 # PSCRIPTFOLDER ist das Wurzelverzeichnis des entpackten Plugin-Archivs
 # (postroot.sh liegt dort direkt neben config/, templates/, daemon/, ... als
@@ -8,9 +28,9 @@
 # Muster, siehe dessen postroot.sh).
 PSCRIPTFOLDER=$(dirname "$0")
 
-BINDIR="/opt/loxberry/bin/plugins/easeemqtt"
-CFGDIR="/opt/loxberry/config/plugins/easeemqtt"
-LOGDIR="/opt/loxberry/log/plugins/easeemqtt"
+BINDIR="REPLACELBPBINDIR"
+CFGDIR="REPLACELBPCONFIGDIR"
+LOGDIR="REPLACELBPLOGDIR"
 SYSTEMDUNIT="/etc/systemd/system/easeemqtt.service"
 
 mkdir -p "$BINDIR" "$CFGDIR" "$LOGDIR"

@@ -5,12 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=EASEEMQTT_CONFIG=/opt/loxberry/config/plugins/easeemqtt/config.json
-ExecStart=/opt/loxberry/bin/plugins/easeemqtt/easeemqtt
+Environment=EASEEMQTT_CONFIG=REPLACELBPCONFIGDIR/config.json
+ExecStart=REPLACELBPBINDIR/easeemqtt
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:/opt/loxberry/log/plugins/easeemqtt/easeemqtt.log
-StandardError=append:/opt/loxberry/log/plugins/easeemqtt/easeemqtt.log
+StandardOutput=append:REPLACELBPLOGDIR/easeemqtt.log
+StandardError=append:REPLACELBPLOGDIR/easeemqtt.log
 User=loxberry
 Group=loxberry
 
