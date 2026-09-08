@@ -99,7 +99,11 @@ print <<'HTML';
 .em-app .btn-group { display: flex; gap: 10px; margin-top: 18px; margin-bottom: 20px; flex-wrap: wrap; }
 
 .em-app table.ga-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.em-app table.ga-table th { text-align: left; color: var(--txt2); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--brd); font-size: 11px; text-transform: uppercase; letter-spacing: .3px; position: sticky; top: 0; background: var(--surface); z-index: 1; }
+/* Sticky-Header braucht einen wirklich deckenden Hintergrund, sonst
+   scheint der scrollende Inhalt durch (var(--surface) loest bei LoxBerrys
+   Theme auf einen leicht transparenten Wert auf - gleicher Grund wie beim
+   Modal oben, deshalb hier ebenfalls feste Literalfarbe statt Variable). */
+.em-app table.ga-table th { text-align: left; color: var(--txt2); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--brd); font-size: 11px; text-transform: uppercase; letter-spacing: .3px; position: sticky; top: 0; background: #1c1c20 !important; z-index: 1; }
 .em-app table.ga-table td { padding: 5px 8px; border-bottom: 1px solid var(--brd); color: var(--txt) !important; }
 .em-app table.ga-table input, .em-app table.ga-table select { width: 100%; padding: 6px 8px; font-size: 13px; }
 .em-app table.ga-table .ga-del { cursor: pointer; color: var(--danger); font-size: 16px; }
@@ -412,7 +416,7 @@ let FOUND_CHARGERS = [];
 // Build-Marker: von Hand hochzählen bei relevanten Änderungen - gleiche
 // Debug-Infrastruktur wie KNXtoLOX (dort entscheidend fürs schnelle
 // Fehler-Isolieren auf echter Hardware).
-const UI_BUILD = '2026-09-08-01';
+const UI_BUILD = '2026-09-08-02';
 console.log('[EaseeMQTT] index.cgi UI_BUILD=' + UI_BUILD);
 
 const CLIENT_LOG = [];
