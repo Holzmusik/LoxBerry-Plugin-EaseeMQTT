@@ -114,7 +114,23 @@ if [ $BUILD_RC -ne 0 ] || [ ! -x "$BINDIR/easeemqtt" ]; then
   exit 1
 fi
 
-# Default-Config anlegen, falls noch keine existiert (wird spaeter ueber Web-UI ueberschrieben)
+# Von preupgrade.sh gesicherte Einstellungen wiederherstellen (siehe dort):
+# LoxBerrys eigener Installer loescht "$CFGDIR" bei JEDEM Update komplett,
+# BEVOR postroot.sh ueberhaupt laeuft - config.json und secret.key kommen
+# hier also aus dem Backup zurueck, nicht per Zufall/Glueck. Bei einer
+# echten Erstinstallation existiert kein Backup (preupgrade.sh laeuft dann
+# gar nicht erst) - dann greift wie bisher die Default-Config unten.
+BACKUP_DIR="/tmp/easeemqtt-preupgrade-backup"
+if [ -f "$BACKUP_DIR/config.json" ]; then
+  cp -a "$BACKUP_DIR/config.json" "$CFGDIR/config.json"
+fi
+if [ -f "$BACKUP_DIR/secret.key" ]; then
+  cp -a "$BACKUP_DIR/secret.key" "$CFGDIR/secret.key"
+fi
+rm -rf "$BACKUP_DIR"
+
+# Default-Config anlegen, falls noch keine existiert (echte Erstinstallation;
+# wird spaeter ueber Web-UI ueberschrieben)
 if [ ! -f "$CFGDIR/config.json" ]; then
   cp "$PSCRIPTFOLDER/config/config.json.default" "$CFGDIR/config.json"
 fi
