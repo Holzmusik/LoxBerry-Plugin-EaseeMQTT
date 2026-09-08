@@ -179,8 +179,7 @@ print <<'HTML';
 <aside class="sidebar">
   <div class="sidebar-logo">EaseeMQTT<span>Easee &lt;-&gt; Loxone Brücke</span></div>
   <nav class="nav">
-    <div class="nav-item active" data-page="overview">Übersicht</div>
-    <div class="nav-item" data-page="account">Konto &amp; Wallboxen</div>
+    <div class="nav-item active" data-page="account">Übersicht &amp; Konto</div>
     <div class="nav-item" data-page="mqtt">MQTT</div>
     <div class="nav-item" data-page="data">Daten</div>
     <div class="nav-item" data-page="loxone">Loxone-Import</div>
@@ -191,23 +190,15 @@ print <<'HTML';
 
 <main class="main">
 
-  <section id="page-overview" class="page active">
-    <h2>Übersicht</h2>
+  <section id="page-account" class="page active">
+    <h2>Übersicht &amp; Konto</h2>
     <div class="card">
       <div class="card-title">Dienst</div>
       <div class="status-bar"><span class="status-dot" id="dot-svc"></span><span id="txt-svc">easeemqtt (Easee &lt;-&gt; MQTT) ...</span></div>
       <div class="hint">
-        Protokollbrücke: Easee-Cloud &lt;-&gt; MQTT.
+        Protokollbrücke: Easee-Cloud &lt;-&gt; MQTT. <span id="charger-summary">lädt ...</span>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">Konfigurierte Wallboxen</div>
-      <div id="charger-summary" class="hint">lädt ...</div>
-    </div>
-  </section>
-
-  <section id="page-account" class="page">
-    <h2>Konto &amp; Wallboxen</h2>
     <div class="card">
       <div class="card-title">Easee-Konto</div>
       <div class="row">
@@ -421,7 +412,7 @@ let FOUND_CHARGERS = [];
 // Build-Marker: von Hand hochzählen bei relevanten Änderungen - gleiche
 // Debug-Infrastruktur wie KNXtoLOX (dort entscheidend fürs schnelle
 // Fehler-Isolieren auf echter Hardware).
-const UI_BUILD = '2026-09-07-17';
+const UI_BUILD = '2026-09-08-01';
 console.log('[EaseeMQTT] index.cgi UI_BUILD=' + UI_BUILD);
 
 const CLIENT_LOG = [];

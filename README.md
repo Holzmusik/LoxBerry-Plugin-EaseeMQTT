@@ -123,9 +123,9 @@ Speichern automatisch den bestehenden Wert.
 
 Single-Page-App (`webfrontend/htmlauth/index.cgi` + `api.cgi`). Seiten:
 
-- **Übersicht**: Dienst-Status, konfigurierte Wallboxen
-- **Konto & Wallboxen**: Login-Test, "Ladegeräte suchen"-Picker gegen die
-  echte Easee-API, editierbare Charger-Tabelle (beliebig viele Einträge)
+- **Übersicht & Konto**: Dienst-Status, Login-Test, "Ladegeräte suchen"-Picker
+  gegen die echte Easee-API, editierbare Charger-Tabelle (beliebig viele
+  Einträge)
 - **MQTT**: lokaler oder externer Broker
 - **Daten**: Checkbox-Liste aller 170 Observation-IDs nach Kategorie
   gruppiert, mit Suche und "Basis-Setup"/"Alle"/"Keine"-Schnellauswahl -
@@ -178,7 +178,7 @@ JSON-Aufteilung entfällt komplett.
 2. `postroot.sh` baut `easeemqtt` aus dem mitgelieferten `daemon/`-Quellcode
    (`go mod tidy && go build`, braucht Internetzugriff zum Go-Modul-Proxy),
    richtet den systemd-Dienst ein.
-3. Unter "Konto & Wallboxen": Easee-Zugangsdaten eintragen, testen,
+3. Unter "Übersicht & Konto": Easee-Zugangsdaten eintragen, testen,
    Ladegeräte suchen und der Tabelle hinzufügen.
 4. Unter "MQTT": lokalen Broker bestätigen oder externen Broker eintragen.
 5. Speichern - der Dienst startet automatisch mit der neuen Konfiguration
