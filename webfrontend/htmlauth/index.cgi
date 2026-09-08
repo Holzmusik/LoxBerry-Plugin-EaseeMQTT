@@ -322,8 +322,8 @@ print <<'HTML';
         <div class="field" style="max-width:320px">
           <label>Protokoll im MQTT-Gateway (Tab "Gateway")</label>
           <select id="loxone-protocol" data-role="none" onchange="renderLoxoneExport()">
-            <option value="udp">UDP (empfohlen - ein Eingang für alle Werte)</option>
-            <option value="http">HTTP (ein Virtueller Eingang pro Wert)</option>
+            <option value="udp">UDP (ein gemeinsamer Eingang für alle Werte, keine Einzelberechtigungen nötig)</option>
+            <option value="http">HTTP (ein eigener Virtueller Eingang pro Wert, jeweils mit eigenen Berechtigungen)</option>
           </select>
         </div>
         <div class="field" style="max-width:320px">
@@ -421,7 +421,7 @@ let FOUND_CHARGERS = [];
 // Build-Marker: von Hand hochzählen bei relevanten Änderungen - gleiche
 // Debug-Infrastruktur wie KNXtoLOX (dort entscheidend fürs schnelle
 // Fehler-Isolieren auf echter Hardware).
-const UI_BUILD = '2026-09-07-16';
+const UI_BUILD = '2026-09-07-17';
 console.log('[EaseeMQTT] index.cgi UI_BUILD=' + UI_BUILD);
 
 const CLIENT_LOG = [];

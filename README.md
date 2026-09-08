@@ -149,9 +149,12 @@ zwischen MQTT-Broker und Miniserver vermittelt. Ablauf (Details:
    einmalig abonnieren (kein API-Zugriff dafür vorhanden - manueller
    Schritt, die "Loxone-Import"-Seite liefert nur die danach benötigten
    Werte).
-2. Auf der "Loxone-Import"-Seite Protokoll wählen (UDP empfohlen - ein
-   einziger Virtueller UDP-Eingang für beliebig viele Werte, statt bei HTTP
-   pro Wert ein eigener Virtueller Eingang samt eigener Berechtigungen).
+2. Auf der "Loxone-Import"-Seite Protokoll wählen, je nachdem was im
+   MQTT-Gateway-Plugin eingestellt ist (beide werden von LoxBerry
+   gleichwertig unterstützt). Unterschied: bei UDP reicht ein einziger
+   Virtueller UDP-Eingang für beliebig viele Werte; bei HTTP braucht jeder
+   Wert einen eigenen Virtuellen Eingang mit eigenen Berechtigungen (siehe
+   LoxBerry-Wiki).
 3. Generierte Werte in Loxone Config einfügen:
    - **State-Topics (UDP)**: je Zeile ein *Virtueller UDP Eingang Befehl*
      unter einem gemeinsamen *Virtuellen UDP Eingang* (Port = Gateway
