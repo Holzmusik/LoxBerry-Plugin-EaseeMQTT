@@ -78,6 +78,7 @@ BUILD_DIR="$(mktemp -d)"
 cp -r "$PSCRIPTFOLDER/daemon/." "$BUILD_DIR/"
 (
   cd "$BUILD_DIR" || exit 1
+  export CGO_ENABLED=0
   # go mod tidy statt nur "go build": es liegt bewusst KEIN vorgefertigtes
   # go.sum im Plugin-Zip (dessen Prüfsummen könnten ohne echten Go-Build auf
   # dem Dev-Rechner nicht verifiziert werden) - go mod tidy loest die in

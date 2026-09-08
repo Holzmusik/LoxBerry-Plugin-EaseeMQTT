@@ -9,12 +9,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"easeemqtt/internal/bridge"
 	"easeemqtt/internal/config"
@@ -51,6 +53,44 @@ func runCrypto(mode, cfgPath string) {
 	fmt.Println(out)
 }
 
+// credentialRetryDelay: Abstand zwischen zwei Login-Versuchen, NACHDEM
+// Easee die Zugangsdaten explizit abgelehnt hat (HTTP 400/401). Bewusst
+// lang (5 Minuten) statt sich auf systemds RestartSec=5 zu verlassen - ein
+// falsches Passwort behebt sich nicht durch schnelles Neuversuchen, und
+// dichte Login-Versuche im Sekundentakt sind bei Cloud-Auth-APIs oft genau
+// der Trigger fuer temporaere Account-Sperren (siehe ErrInvalidCredentials-
+// Kommentar in auth.go).
+const credentialRetryDelay = 5 * time.Minute
+
+// loginWithCredentialBackoff versucht Login(), bis es entweder klappt oder
+// ctx endet (SIGINT/SIGTERM). Ein transienter Fehler (Netzwerk, Easee-Cloud
+// 5xx) wird SOFORT nach oben durchgereicht - main() beendet den Prozess
+// dann per log.Fatalf, und systemds Restart=on-failure/RestartSec=5 greift
+// wie gehabt (dafuer ist dieser schnelle Restart-Loop gedacht: transiente
+// Fehler sollen sich schnell von selbst loesen). NUR bei
+// easee.ErrInvalidCredentials wird HIER, im Prozess selbst, mit
+// credentialRetryDelay weitergewartet und erneut versucht, statt den
+// Prozess ueberhaupt zu beenden - genau das verhindert den Login-Hammer bei
+// dauerhaft falschem Passwort.
+func loginWithCredentialBackoff(ctx context.Context, auth *easee.Auth) error {
+	for {
+		err := auth.Login(ctx)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, easee.ErrInvalidCredentials) {
+			return err
+		}
+		log.Printf("Easee-Login abgelehnt - bitte Benutzername/Passwort in der Web-UI pruefen: %v", err)
+		log.Printf("naechster Login-Versuch in %s", credentialRetryDelay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(credentialRetryDelay):
+		}
+	}
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags)
 
@@ -72,7 +112,11 @@ func main() {
 	defer stop()
 
 	auth := easee.NewAuth(cfg.Easee.Username, cfg.Easee.Password)
-	if err := auth.Login(ctx); err != nil {
+	if err := loginWithCredentialBackoff(ctx, auth); err != nil {
+		// Nur hier (ctx.Done(), also SIGINT/SIGTERM waehrend des Wartens)
+		// oder ein echter, nicht-klassifizierbarer Fehler kommt zurueck -
+		// ErrInvalidCredentials selbst fuehrt NIE hierher, siehe
+		// loginWithCredentialBackoff().
 		log.Fatalf("Easee-Login fehlgeschlagen: %v", err)
 	}
 	go auth.RunBackgroundRefresh(ctx)

@@ -13,12 +13,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
 	"time"
 )
+
+// ErrInvalidCredentials wird von Login() zurueckgegeben, wenn der
+// Login-Endpoint einen klaren Credential-Fehler meldet (HTTP 400/401) - im
+// Unterschied zu einem transienten Fehler (Netzwerk weg, Easee-Cloud 5xx)
+// rechtfertigt das KEINEN schnellen Restart-Loop durch systemd: ein falsches
+// Passwort behebt sich nicht durch Warten und erneutes Versuchen, und
+// wiederholte Login-Versuche im Sekundentakt sind bei den meisten Cloud-
+// Auth-APIs genau der Trigger fuer temporaere Account-Sperren. main.go
+// behandelt diesen Fall deshalb bewusst separat (langer Retry-Abstand statt
+// Prozess-Crash), siehe dortiger Kommentar.
+var ErrInvalidCredentials = errors.New("easee auth: Zugangsdaten abgelehnt (HTTP 400/401 vom Login-Endpoint)")
 
 // APIBase ist verifiziert gegen den echten evcc-io/evcc-Produktionscode
 // (const API = "https://api.easee.com/api" im Package charger/easee).
@@ -43,7 +55,7 @@ type tokenResponse struct {
 // beide rufen vor jeder Anfrage AccessToken() auf statt selbst zu verwalten.
 type Auth struct {
 	username, password string
-	httpClient          *http.Client
+	httpClient         *http.Client
 
 	mu           sync.Mutex
 	accessToken  string
@@ -73,7 +85,7 @@ func (a *Auth) Login(ctx context.Context) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return a.doTokenRequest(req)
+	return a.doTokenRequest(req, true)
 }
 
 // refresh erneuert den Token ueber den refreshToken, OHNE erneut Benutzername/
@@ -92,7 +104,12 @@ func (a *Auth) refresh(ctx context.Context) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if err := a.doTokenRequest(req); err != nil {
+	// classifyAuthErrors=false: ein 400/401 hier bedeutet nur "refreshToken
+	// abgelaufen/ungueltig", NICHT zwingend "Benutzername/Passwort falsch" -
+	// die eigentliche Klassifizierung passiert erst im Login()-Fallback
+	// direkt darunter, der bei echten Credential-Fehlern seinerseits
+	// ErrInvalidCredentials liefert.
+	if err := a.doTokenRequest(req, false); err != nil {
 		// Refresh fehlgeschlagen (z.B. refreshToken invalidiert) - kompletter
 		// Neu-Login als Fallback, statt dauerhaft haengen zu bleiben.
 		return a.Login(ctx)
@@ -100,7 +117,7 @@ func (a *Auth) refresh(ctx context.Context) error {
 	return nil
 }
 
-func (a *Auth) doTokenRequest(req *http.Request) error {
+func (a *Auth) doTokenRequest(req *http.Request, classifyAuthErrors bool) error {
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("easee auth: request fehlgeschlagen: %w", err)
@@ -108,6 +125,9 @@ func (a *Auth) doTokenRequest(req *http.Request) error {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
+		if classifyAuthErrors && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized) {
+			return fmt.Errorf("%w (HTTP %d: %s)", ErrInvalidCredentials, resp.StatusCode, string(data))
+		}
 		return fmt.Errorf("easee auth: HTTP %d: %s", resp.StatusCode, string(data))
 	}
 	var tr tokenResponse

@@ -11,6 +11,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -251,6 +252,20 @@ type Bridge struct {
 	// "nichts publizieren" (Nutzer hat in der UI alles abgewaehlt).
 	filter        map[int]bool
 	warnedUnknown map[int]bool
+
+	// dedupe verhindert unnoetige Cloud-Calls auf den set/*-Kommando-Topics:
+	// Loxones Ueberschussladung schreibt set/dynamic_current typischerweise
+	// im Sekundentakt neu, auch wenn sich der Ampere-Wert gar nicht
+	// veraendert hat. Ohne diese Sperre wuerde JEDE MQTT-Message 1:1 einen
+	// REST-Call an die Easee-Cloud ausloesen. Das etablierte
+	// nordicopen/easee_hass-Projekt musste dafuer extra einen eigenen
+	// Release bringen (v0.9.68: "optimizes the use of the Easee API to
+	// avoid rate limiting") - Standard dort ist, den Call nur bei
+	// tatsaechlicher Wertaenderung abzusetzen. dedupeMu schuetzt beide Maps,
+	// da MQTT-Handler von der paho-Bibliothek nebenlaeufig aus mehreren
+	// Goroutinen aufgerufen werden koennen.
+	dedupeMu sync.Mutex
+	lastSent map[string]string
 }
 
 func New(cfg *config.Config, rest restCommander) *Bridge {
@@ -267,7 +282,39 @@ func New(cfg *config.Config, rest restCommander) *Bridge {
 		prefix:        cfg.MQTT.TopicPrefix,
 		filter:        filter,
 		warnedUnknown: map[int]bool{},
+		lastSent:      map[string]string{},
 	}
+}
+
+// shouldSend liefert true nur, wenn sich value fuer diesen Topic seit dem
+// letzten ERFOLGREICH abgesetzten Call veraendert hat - der Topic-String
+// selbst ist der Cache-Key, das deckt Charger-ID+Kommando in einem Schritt ab
+// ohne separate Verschachtelung. Der ALLERERSTE Wert nach Neustart des
+// Daemons wird bewusst immer gesendet (Cache ist leer -> "unbekannt" zaehlt
+// als Aenderung), damit z.B. nach einem Neustart des Diensts der zuletzt von
+// Loxone gewollte Zustand tatsaechlich beim Charger ankommt statt stumm
+// uebersprungen zu werden.
+//
+// WICHTIG: markiert NICHT selbst als gesendet - das macht markSent() erst
+// NACH einem erfolgreichen REST-Call (siehe die drei Handler unten). Wuerde
+// shouldSend() den Wert schon VOR dem eigentlichen Call cachen, wuerde ein
+// fehlgeschlagener Call (Netzhaenger, Easee-Cloud kurz nicht erreichbar) den
+// Wert trotzdem als "erledigt" verbuchen - kommt Loxone spaeter mit
+// demselben (unveraenderten) Wert nochmal vorbei, wuerde der Dedupe-Schutz
+// das faelschlich verwerfen, und der Charger bekaeme den Wert nie. Deshalb
+// zwei getrennte Schritte: pruefen VOR dem Call, festschreiben NUR bei Erfolg.
+func (b *Bridge) shouldSend(topic, value string) bool {
+	b.dedupeMu.Lock()
+	defer b.dedupeMu.Unlock()
+	return b.lastSent[topic] != value
+}
+
+// markSent schreibt den Wert erst NACH einem erfolgreich durchgefuehrten
+// REST-Call fest - siehe Kommentar an shouldSend().
+func (b *Bridge) markSent(topic, value string) {
+	b.dedupeMu.Lock()
+	b.lastSent[topic] = value
+	b.dedupeMu.Unlock()
 }
 
 // Connect baut die MQTT-Verbindung auf (mit LWT auf <prefix>bridge/status)
@@ -366,11 +413,16 @@ func (b *Bridge) boolHandler(chargerID, label string, fn func(ctx context.Contex
 			log.Printf("bridge: %s: %v", msg.Topic(), err)
 			return
 		}
+		valStr := strconv.FormatBool(v)
+		if !b.shouldSend(msg.Topic(), valStr) {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := fn(ctx, chargerID, v); err != nil {
 			log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
 		} else {
+			b.markSent(msg.Topic(), valStr)
 			log.Printf("bridge: %s fuer %s auf %v gesetzt", label, chargerID, v)
 		}
 	}
@@ -383,11 +435,16 @@ func (b *Bridge) intHandler(chargerID, label string, fn func(ctx context.Context
 			log.Printf("bridge: %s: Payload %q ist keine Ganzzahl: %v", msg.Topic(), string(msg.Payload()), err)
 			return
 		}
+		valStr := strconv.Itoa(v)
+		if !b.shouldSend(msg.Topic(), valStr) {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := fn(ctx, chargerID, v); err != nil {
 			log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
 		} else {
+			b.markSent(msg.Topic(), valStr)
 			log.Printf("bridge: %s fuer %s auf %d gesetzt", label, chargerID, v)
 		}
 	}
@@ -400,11 +457,23 @@ func (b *Bridge) floatHandler(chargerID, label string, fn func(ctx context.Conte
 			log.Printf("bridge: %s: Payload %q ist keine Zahl: %v", msg.Topic(), string(msg.Payload()), err)
 			return
 		}
+		// FormatFloat mit fester Genauigkeit (2 Nachkommastellen): Loxone
+		// schickt bei einer Gleitkommaregelung leicht unterschiedliche
+		// Repraesentationen desselben Werts (z.B. "16" vs "16.0" vs
+		// "16.00001" durch Rundungsrauschen) - ohne feste Formatierung
+		// wuerde der String-Vergleich in shouldSend() solche Mikro-
+		// Unterschiede faelschlich als echte Aenderung werten und den
+		// Dedupe-Schutz aushebeln.
+		valStr := strconv.FormatFloat(v, 'f', 2, 64)
+		if !b.shouldSend(msg.Topic(), valStr) {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := fn(ctx, chargerID, v); err != nil {
 			log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
 		} else {
+			b.markSent(msg.Topic(), valStr)
 			log.Printf("bridge: %s fuer %s auf %.1f gesetzt", label, chargerID, v)
 		}
 	}
