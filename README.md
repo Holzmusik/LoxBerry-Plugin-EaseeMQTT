@@ -193,3 +193,9 @@ JSON-Aufteilung entfällt komplett.
   GitHub-Thread im Zusammenhang mit einem IP-Ratelimit ("Blackhole")
   genannt - der Daemon verwendet deshalb bewusst moderates Backoff statt
   aggressiver Reconnect-Versuche.
+
+## Lizenz / Drittanbieter-Bibliotheken
+
+Dieses Projekt steht unter der [MIT-Lizenz](LICENSE). Verwendete
+Open-Source-Abhängigkeiten des Go-Daemons samt jeweiliger Lizenz siehe
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
