@@ -21,6 +21,7 @@ import (
 	"easeemqtt/internal/bridge"
 	"easeemqtt/internal/config"
 	"easeemqtt/internal/easee"
+	"easeemqtt/internal/loxberrylog"
 )
 
 // runCrypto bedient "easeemqtt encrypt <config-pfad>" / "easeemqtt decrypt
@@ -129,11 +130,18 @@ func main() {
 	}
 	defer br.Disconnect()
 
+	// Watcher fuer LoxBerrys nativen, pro-Plugin Log-Level-Schalter (siehe
+	// internal/loxberrylog) - macht den in der Plugin-Verwaltung gewaehlten
+	// Wert live wirksam, primaer fuer den sonst sehr geschwaetzigen
+	// SignalR-Client (siehe easee.NewHub).
+	logLevel := loxberrylog.NewWatcher(loxberrylog.FolderFromConfigPath(cfgPath), "")
+	logLevel.Start(ctx.Done())
+
 	chargerIDs := make([]string, 0, len(cfg.Easee.Chargers))
 	for _, ch := range cfg.Easee.Chargers {
 		chargerIDs = append(chargerIDs, ch.ID)
 	}
-	hub := easee.NewHub(auth, chargerIDs, br.HandleObservation)
+	hub := easee.NewHub(auth, chargerIDs, br.HandleObservation, logLevel)
 
 	log.Printf("easeemqtt gestartet - %d Charger, MQTT-Prefix %q", len(chargerIDs), cfg.MQTT.TopicPrefix)
 

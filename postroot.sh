@@ -140,11 +140,34 @@ fi
 # mit drin).
 chown -R loxberry.loxberry "$CFGDIR" 2>/dev/null || true
 
-# systemd-Unit installieren
-cp "$PSCRIPTFOLDER/templates/system/etc/systemd/system/easeemqtt.service" "$SYSTEMDUNIT"
+# systemd-Unit installieren.
+# WICHTIG (2026-09-18, am Schwester-Plugin froniusmqtt real-hardware-
+# verifiziert): ein reines "cp" reicht hier NICHT zuverlaessig - anders als
+# bei postroot.sh/preupgrade.sh selbst (deren Skripttext LoxBerrys
+# Installer NACHWEISLICH per replaceenv()/sed VOR der Ausfuehrung ersetzt)
+# greift die REPLACELBP*-Platzhalter-Ersetzung NICHT zuverlaessig auch fuer
+# beliebige andere kopierte Dateien wie diese Systemd-Unit-Vorlage - bei
+# froniusmqtts erster Installation blieben die Platzhalter woertlich
+# stehen, systemd lehnte die Unit mit "bad unit file setting" ab. Dieses
+# Plugin lief bislang nur deshalb ohne sichtbares Problem, weil es seit
+# seiner letzten echten Neuinstallation nicht erneut betroffen war - zur
+# Absicherung hier trotzdem auf denselben expliziten Sed-Ersatz umgestellt,
+# der sich nicht auf die unzuverlaessige externe Ersetzung verlaesst.
+sed \
+  -e "s#REPLACELBPBINDIR#$BINDIR#g" \
+  -e "s#REPLACELBPCONFIGDIR#$CFGDIR#g" \
+  -e "s#REPLACELBPLOGDIR#$LOGDIR#g" \
+  "$PSCRIPTFOLDER/templates/system/etc/systemd/system/easeemqtt.service" > "$SYSTEMDUNIT"
 systemctl daemon-reload
 systemctl enable easeemqtt.service
 systemctl restart easeemqtt.service
+
+# Logrotate installieren (2026-09-18: ohne das wachsen Logdateien
+# unbegrenzt - real beobachtet: easeemqtt.log auf 95MB, siehe
+# Session-Notizen zum easeemqtt/knxmqtt/miraibridge-Vorfall).
+sed \
+  -e "s#REPLACELBPLOGDIR#$LOGDIR#g" \
+  "$PSCRIPTFOLDER/templates/system/etc/logrotate.d/easeemqtt" > /etc/logrotate.d/easeemqtt
 
 echo "Easee-MQTT Plugin Installation abgeschlossen."
 exit 0

@@ -9,7 +9,11 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	kitlog "github.com/go-kit/log"
+	kitlevel "github.com/go-kit/log/level"
 	"github.com/philippseith/signalr"
+
+	"easeemqtt/internal/loxberrylog"
 )
 
 // HubURL verifiziert gegen den echten evcc-io/evcc-Produktionscode
@@ -39,15 +43,62 @@ type Hub struct {
 	chargerIDs    []string
 	onObservation func(Observation)
 	httpClient    *http.Client
+	logLevel      *loxberrylog.Watcher
 }
 
-func NewHub(auth *Auth, chargerIDs []string, onObservation func(Observation)) *Hub {
+// NewHub: logLevel darf nil sein (z.B. lokaler Testlauf ohne echten
+// Watcher) - dann verhaelt sich die SignalR-Bibliothek wie beim bisherigen
+// festen NopLogger, siehe gatedKitLogger.Log().
+func NewHub(auth *Auth, chargerIDs []string, onObservation func(Observation), logLevel *loxberrylog.Watcher) *Hub {
 	return &Hub{
 		auth:          auth,
 		chargerIDs:    chargerIDs,
 		onObservation: onObservation,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		logLevel:      logLevel,
 	}
+}
+
+// gatedKitLogger reicht eine SignalR-Log-Zeile nur dann an den echten
+// logfmt-Logger (stderr, landet ueber systemd im easeemqtt.log) weiter,
+// wenn das aktuell in LoxBerrys plugindatabase.json konfigurierte Level
+// (siehe internal/loxberrylog) das erlaubt. philippseith/signalr injiziert
+// bei jedem Log()-Aufruf ein Level-Value-Paar via go-kit/log/level
+// (level.Info(...)/level.Debug(...)) - Erkennung ueber die vier
+// exportierten Singleton-Werte (level.DebugValue() usw.), NICHT ueber den
+// unexportierten internen Filtertyp der Bibliothek (siehe Recherche in der
+// Session-Historie: go-kit/log/level's eigener Filter tut intern dasselbe,
+// nur mit einem unexportierten Typ - dieselbe Erkennung ist ueber die
+// oeffentliche API genauso zuverlaessig moeglich).
+type gatedKitLogger struct {
+	base     kitlog.Logger
+	logLevel *loxberrylog.Watcher
+}
+
+func (g *gatedKitLogger) Log(keyvals ...interface{}) error {
+	if g.logLevel == nil {
+		return nil // kein Watcher (z.B. lokaler Testlauf) - stumm wie zuvor
+	}
+	msgLevel := loxberrylog.LevelInfo
+	for i := 1; i < len(keyvals); i += 2 {
+		switch keyvals[i] {
+		case kitlevel.DebugValue():
+			msgLevel = loxberrylog.LevelDebug
+		case kitlevel.WarnValue():
+			msgLevel = loxberrylog.LevelWarning
+		case kitlevel.ErrorValue():
+			msgLevel = loxberrylog.LevelError
+		case kitlevel.InfoValue():
+			msgLevel = loxberrylog.LevelInfo
+		default:
+			continue
+		}
+		break
+	}
+	if !g.logLevel.Enabled(msgLevel) {
+		return nil
+	}
+	return g.base.Log(keyvals...)
 }
 
 // receiver implementiert die Server->Client-Callback-Methoden, die
@@ -171,6 +222,25 @@ func (h *Hub) Run(ctx context.Context) error {
 		signalr.WithConnector(func() (signalr.Connection, error) { return h.connect(ctx) }),
 		signalr.WithBackoff(newBackoff),
 		signalr.WithReceiver(&receiver{hub: h}),
+		// OHNE dieses Logger()-Funktions-Option nutzt philippseith/signalr
+		// intern IMMER seinen eingebauten Default (siehe NewClient() der
+		// Bibliothek: log.NewLogfmtLogger(os.Stderr) mit debug=true fest
+		// verdrahtet, unabhaengig von unserem eigenen log.Printf/
+		// log.SetFlags) - real bestaetigt als Ursache von easeemqtt.log's
+		// unkontrolliertem Wachstum (2026-09-18, 95MB): der SignalR-
+		// Keepalive-Ping/Pong-Frame wird dadurch alle 5 Sekunden, rund um
+		// die Uhr, als eigene Debug-Zeile geloggt.
+		//
+		// debug=true hier ist ABSICHTLICH weiterhin gesetzt (nicht false) -
+		// sonst wuerden Debug-Zeilen von der Bibliothek selbst schon VOR
+		// unserem gatedKitLogger verworfen, und der LoxBerry-Dropdown
+		// koennte "Debug" nie mehr sichtbar zur Wirkung bringen. Die
+		// eigentliche Drosselung passiert dynamisch in gatedKitLogger.Log()
+		// anhand des live aus plugindatabase.json gelesenen Levels - steht
+		// der Dropdown auf "Fehler" (Default), ist das Ergebnis identisch
+		// leise wie zuvor mit dem festen NopLogger; steht er auf "Debug",
+		// bekommt man den vollen SignalR-Trace ohne Neustart des Diensts.
+		signalr.Logger(&gatedKitLogger{base: kitlog.NewLogfmtLogger(log.Writer()), logLevel: h.logLevel}, true),
 	)
 	if err != nil {
 		return fmt.Errorf("easee signalr: Client konnte nicht erstellt werden: %w", err)
