@@ -212,6 +212,10 @@ var observationTopics = map[int]string{
 	230: "eq_available_current_p1",
 	231: "eq_available_current_p2",
 	232: "eq_available_current_p3",
+	// 241 (wifi_mac_address) ist NICHT Teil der evcc-Enum-Liste, aber real
+	// bestaetigt (Nutzer-Mitschnitt 2026-09-25 lieferte eine MAC-Adresse als
+	// Wert; Name aus pyeasee/const.py: config_wiFiMACAddress).
+	241: "wifi_mac_address",
 	250: "connected_to_cloud",
 	251: "cloud_disconnect_reason",
 }
