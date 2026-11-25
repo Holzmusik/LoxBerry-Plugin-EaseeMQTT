@@ -250,10 +250,10 @@ type Bridge struct {
 	client mqtt.Client
 	prefix string
 
-	// filter == nil bedeutet "keine Einschraenkung, alles publizieren" -
-	// siehe config.MQTTConfig.EnabledObservations fuer die Nil/leer-
-	// Unterscheidung. Ein leeres, aber nicht-nil Filter bedeutet bewusst
-	// "nichts publizieren" (Nutzer hat in der UI alles abgewaehlt).
+	// filter: Positivliste der zu publizierenden Observation-IDs. Fehlt
+	// enabled_observations in config.json, enthaelt sie alle bekannten IDs
+	// ausser sensitiveObservations (siehe New). Ein leerer Filter bedeutet
+	// bewusst "nichts publizieren" (Nutzer hat in der UI alles abgewaehlt).
 	filter        map[int]bool
 	warnedUnknown map[int]bool
 
@@ -283,12 +283,28 @@ type Bridge struct {
 // heartbeatInterval: Abstand fuer <prefix>bridge/heartbeat.
 const heartbeatInterval = 60 * time.Second
 
+// sensitiveObservations werden nie ohne ausdrueckliche Auswahl publiziert:
+// RFID-/Ausweis-Token (69, 108, 128), SIM-ICCID (81), WLAN-Name (36) und
+// MAC-Adresse (241). In der Web-UI markiert und von "Alle auswaehlen"
+// ausgenommen; hier gilt dasselbe fuer eine config.json ohne
+// enabled_observations.
+var sensitiveObservations = map[int]bool{36: true, 69: true, 81: true, 108: true, 128: true, 241: true}
+
 func New(cfg *config.Config, rest restCommander) *Bridge {
 	var filter map[int]bool
 	if cfg.MQTT.EnabledObservations != nil {
 		filter = make(map[int]bool, len(cfg.MQTT.EnabledObservations))
 		for _, id := range cfg.MQTT.EnabledObservations {
 			filter[id] = true
+		}
+	} else {
+		// Feld fehlt in config.json: alles AUSSER personenbezogenen Werten
+		// (frueher: wirklich alles).
+		filter = make(map[int]bool, len(observationTopics))
+		for id := range observationTopics {
+			if !sensitiveObservations[id] {
+				filter[id] = true
+			}
 		}
 	}
 	ampInterval := config.DefaultDynamicCurrentIntervalS

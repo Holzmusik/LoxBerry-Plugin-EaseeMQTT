@@ -108,3 +108,21 @@ func TestObservationFeedsGate(t *testing.T) {
 		t.Errorf("enabled beobachtet = %q", got)
 	}
 }
+
+func TestFilterDefaultExcludesSensitive(t *testing.T) {
+	b := New(testConfig(), nil) // enabled_observations fehlt
+	for id := range sensitiveObservations {
+		if b.filter[id] {
+			t.Errorf("personenbezogene Observation %d ohne Auswahl publiziert", id)
+		}
+	}
+	if !b.filter[48] || !b.filter[120] {
+		t.Error("normale Observations muessen ohne Filter publiziert werden")
+	}
+	cfg := testConfig()
+	cfg.MQTT.EnabledObservations = []int{128, 48}
+	b = New(cfg, nil)
+	if !b.filter[128] || !b.filter[48] || b.filter[120] {
+		t.Error("explizite Auswahl muss unveraendert gelten (auch fuer personenbezogene IDs)")
+	}
+}

@@ -278,7 +278,10 @@ print <<'HTML';
         Easee liefert 170 verschiedene Werte pro Wallbox (von Ladeleistung
         bis WLAN-Diagnose) - hier auswählen, welche davon tatsächlich als
         MQTT-Topics publiziert werden. Lastmanagement/Steuerung bleibt davon
-        unberührt (Kommando-Topics sind immer alle aktiv).
+        unberührt (Kommando-Topics sind immer alle aktiv). Als
+        <em>personenbezogen</em> markierte Werte (RFID-/Ausweis-Token, SIM-ICCID,
+        WLAN-Name, MAC-Adresse) werden bei "Alle auswählen" nicht mit ausgewählt.
+        Topics auf dem lokalen Broker sind für jeden lesbar, der Zugriff auf den Broker hat.
       </div>
       <div class="row" style="align-items:flex-end">
         <div class="field" style="flex:2">
@@ -425,7 +428,7 @@ let FOUND_CHARGERS = [];
 // Build-Marker: von Hand hochzählen bei relevanten Änderungen - gleiche
 // Debug-Infrastruktur wie KNXtoLOX (dort entscheidend fürs schnelle
 // Fehler-Isolieren auf echter Hardware).
-const UI_BUILD = '2026-11-25-1';
+const UI_BUILD = '2026-11-25-2';
 console.log('[EaseeMQTT] index.cgi UI_BUILD=' + UI_BUILD);
 
 const CLIENT_LOG = [];
@@ -574,7 +577,7 @@ const OBSERVATION_CATALOG = [
   {id:33,name:"circuit_sequence_number",group:"Einstellungen & Verhalten",basic:false},
   {id:34,name:"single_phase_number",group:"Einstellungen & Verhalten",basic:false},
   {id:35,name:"enable3_phases_deprecated",group:"Einstellungen & Verhalten",basic:false},
-  {id:36,name:"wi_fi_ssid",group:"Einstellungen & Verhalten",basic:false},
+  {id:36,name:"wi_fi_ssid",group:"Einstellungen & Verhalten",basic:false,sensitive:true},
   {id:37,name:"enable_idle_current",group:"Einstellungen & Verhalten",basic:false},
   {id:38,name:"phase_mode",group:"Einstellungen & Verhalten",basic:false},
   {id:39,name:"forced_three_phase_on_itwith_gnd_fault",group:"Einstellungen & Verhalten",basic:false},
@@ -597,7 +600,7 @@ const OBSERVATION_CATALOG = [
   {id:62,name:"charging_schedule",group:"Ladeplan & Sessions",basic:false},
   {id:65,name:"paired_equalizer",group:"Ladeplan & Sessions",basic:false},
   {id:68,name:"wi_fi_apenabled",group:"Ladeplan & Sessions",basic:false},
-  {id:69,name:"paired_user_idtoken",group:"Ladeplan & Sessions",basic:false},
+  {id:69,name:"paired_user_idtoken",group:"Ladeplan & Sessions",basic:false,sensitive:true},
   {id:70,name:"circuit_total_allocated_phase_conductor_current_l1",group:"Circuit-Summen & Fahrzeuge",basic:false},
   {id:71,name:"circuit_total_allocated_phase_conductor_current_l2",group:"Circuit-Summen & Fahrzeuge",basic:false},
   {id:72,name:"circuit_total_allocated_phase_conductor_current_l3",group:"Circuit-Summen & Fahrzeuge",basic:false},
@@ -609,7 +612,8 @@ const OBSERVATION_CATALOG = [
   {id:78,name:"number_of_cars_in_queue",group:"Circuit-Summen & Fahrzeuge",basic:false},
   {id:79,name:"number_of_cars_fully_charged",group:"Circuit-Summen & Fahrzeuge",basic:false},
   {id:80,name:"software_release",group:"Hardware & Firmware",basic:false},
-  {id:81,name:"iccid",group:"Hardware & Firmware",basic:false},
+  {id:81,name:"iccid",group:"Hardware & Firmware",basic:false,sensitive:true},
+  {id:241,name:"wifi_mac_address",group:"Hardware & Firmware",basic:false,sensitive:true},
   {id:82,name:"modem_fw_id",group:"Hardware & Firmware",basic:false},
   {id:83,name:"otaerror_code",group:"Hardware & Firmware",basic:false},
   {id:84,name:"mobile_network_operator",group:"Hardware & Firmware",basic:false},
@@ -628,7 +632,7 @@ const OBSERVATION_CATALOG = [
   {id:105,name:"pilot_high",group:"Diagnose",basic:false},
   {id:106,name:"pilot_low",group:"Diagnose",basic:false},
   {id:107,name:"back_plate_id",group:"Diagnose",basic:false},
-  {id:108,name:"user_idtoken_reversed",group:"Diagnose",basic:false},
+  {id:108,name:"user_idtoken_reversed",group:"Diagnose",basic:false,sensitive:true},
   {id:109,name:"opmode",group:"Ladevorgang",basic:true},
   {id:110,name:"output_phase",group:"Ladevorgang",basic:true},
   {id:111,name:"dynamic_circuit_current_p1",group:"Ladevorgang",basic:false},
@@ -648,7 +652,7 @@ const OBSERVATION_CATALOG = [
   {id:125,name:"lifetime_relay_switches",group:"Ladevorgang",basic:false},
   {id:126,name:"lifetime_hours",group:"Ladevorgang",basic:false},
   {id:127,name:"dynamic_current_offline_fallback_depricated",group:"Ladevorgang",basic:false},
-  {id:128,name:"user_idtoken",group:"Ladevorgang",basic:false},
+  {id:128,name:"user_idtoken",group:"Ladevorgang",basic:false,sensitive:true},
   {id:129,name:"charging_session",group:"Ladevorgang",basic:false},
   {id:130,name:"cell_rssi",group:"Mobilfunk & WLAN",basic:false},
   {id:131,name:"cell_rat",group:"Mobilfunk & WLAN",basic:false},
@@ -728,7 +732,9 @@ function obsBasicIds() {
 
 function setObsSelection(mode) {
   if (mode === 'basic') SELECTED_OBS = new Set(obsBasicIds());
-  else if (mode === 'all') SELECTED_OBS = new Set(OBSERVATION_CATALOG.map(o => o.id));
+  // "Alle" bewusst OHNE personenbezogene Werte (Ausweis-/RFID-Token, SIM-
+  // ICCID, WLAN-Name, MAC-Adresse) - die nur gezielt einzeln anhaken.
+  else if (mode === 'all') SELECTED_OBS = new Set(OBSERVATION_CATALOG.filter(o => !o.sensitive).map(o => o.id));
   else SELECTED_OBS = new Set();
   renderObsList();
 }
@@ -754,6 +760,7 @@ function renderObsList() {
         '<div class="obs-check" data-checked="' + SELECTED_OBS.has(o.id) + '"></div>' +
         '<span class="obs-id">' + o.id + '</span>' +
         '<span class="obs-name">' + o.name + '</span>' +
+        (o.sensitive ? '<span class="obs-id" title="Personenbezogener Wert - wird bei &quot;Alle auswählen&quot; nicht mit ausgewählt">personenbezogen</span>' : '') +
       '</div>'
     ).join('');
     return '<div class="obs-group">' +

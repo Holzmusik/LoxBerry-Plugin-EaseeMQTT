@@ -56,8 +56,8 @@ type MQTTConfig struct {
 	// Explorer nicht durch 170 grossteils irrelevante Diagnose-/Debug-Werte
 	// browsen muss. Semantik bewusst ueber die JSON/Go-Nil-Unterscheidung
 	// gesteuert: `nil` (Schluessel fehlt komplett in config.json) bedeutet
-	// "keine Einschraenkung, alles publizieren" (Ruecken-kompatibler Fallback
-	// falls diese Datei jemals ohne dieses Feld existiert); eine explizit
+	// "alles ausser personenbezogenen Werten" (siehe bridge.
+	// sensitiveObservations); eine explizit
 	// vorhandene, ggf. auch leere Liste ist eine echte Positivliste. Die
 	// Web-UI schickt beim Speichern immer die volle Auswahl mit, der Daemon
 	// selbst trifft keine eigene Annahme ueber "sinnvolle" IDs.
