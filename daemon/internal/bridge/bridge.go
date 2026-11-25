@@ -11,7 +11,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -257,19 +256,13 @@ type Bridge struct {
 	filter        map[int]bool
 	warnedUnknown map[int]bool
 
-	// dedupe verhindert unnoetige Cloud-Calls auf den set/*-Kommando-Topics:
-	// Loxones Ueberschussladung schreibt set/dynamic_current typischerweise
-	// im Sekundentakt neu, auch wenn sich der Ampere-Wert gar nicht
-	// veraendert hat. Ohne diese Sperre wuerde JEDE MQTT-Message 1:1 einen
-	// REST-Call an die Easee-Cloud ausloesen. Das etablierte
-	// nordicopen/easee_hass-Projekt musste dafuer extra einen eigenen
-	// Release bringen (v0.9.68: "optimizes the use of the Easee API to
-	// avoid rate limiting") - Standard dort ist, den Call nur bei
-	// tatsaechlicher Wertaenderung abzusetzen. dedupeMu schuetzt beide Maps,
-	// da MQTT-Handler von der paho-Bibliothek nebenlaeufig aus mehreren
-	// Goroutinen aufgerufen werden koennen.
-	dedupeMu sync.Mutex
-	lastSent map[string]string
+	// gate verhindert unnoetige Cloud-Calls auf den set/*-Kommando-Topics
+	// (Loxone schreibt Sollwerte oft im Sekundentakt neu, auch unveraendert -
+	// das nordicopen/easee_hass-Projekt musste dafuer eigens einen Release
+	// bringen, v0.9.68 "avoid rate limiting"), laesst einen Wert aber wieder
+	// durch, wenn die Wallbox per Observation etwas anderes meldet oder der
+	// letzte Call laenger her ist. Siehe dedupe.go.
+	gate *sendGate
 }
 
 func New(cfg *config.Config, rest restCommander) *Bridge {
@@ -286,39 +279,24 @@ func New(cfg *config.Config, rest restCommander) *Bridge {
 		prefix:        cfg.MQTT.TopicPrefix,
 		filter:        filter,
 		warnedUnknown: map[int]bool{},
-		lastSent:      map[string]string{},
+		gate:          newSendGate(),
 	}
 }
 
-// shouldSend liefert true nur, wenn sich value fuer diesen Topic seit dem
-// letzten ERFOLGREICH abgesetzten Call veraendert hat - der Topic-String
-// selbst ist der Cache-Key, das deckt Charger-ID+Kommando in einem Schritt ab
-// ohne separate Verschachtelung. Der ALLERERSTE Wert nach Neustart des
-// Daemons wird bewusst immer gesendet (Cache ist leer -> "unbekannt" zaehlt
-// als Aenderung), damit z.B. nach einem Neustart des Diensts der zuletzt von
-// Loxone gewollte Zustand tatsaechlich beim Charger ankommt statt stumm
-// uebersprungen zu werden.
-//
-// WICHTIG: markiert NICHT selbst als gesendet - das macht markSent() erst
-// NACH einem erfolgreichen REST-Call (siehe die drei Handler unten). Wuerde
-// shouldSend() den Wert schon VOR dem eigentlichen Call cachen, wuerde ein
-// fehlgeschlagener Call (Netzhaenger, Easee-Cloud kurz nicht erreichbar) den
-// Wert trotzdem als "erledigt" verbuchen - kommt Loxone spaeter mit
-// demselben (unveraenderten) Wert nochmal vorbei, wuerde der Dedupe-Schutz
-// das faelschlich verwerfen, und der Charger bekaeme den Wert nie. Deshalb
-// zwei getrennte Schritte: pruefen VOR dem Call, festschreiben NUR bei Erfolg.
+// shouldSend/markSent: duenne Huellen um sendGate (siehe dedupe.go). Wichtig
+// bleibt die Trennung: pruefen VOR dem REST-Call, festschreiben NUR nach
+// Erfolg - ein fehlgeschlagener Call (Netzhaenger, Cloud kurz weg) darf den
+// Wert nicht als erledigt verbuchen.
 func (b *Bridge) shouldSend(topic, value string) bool {
-	b.dedupeMu.Lock()
-	defer b.dedupeMu.Unlock()
-	return b.lastSent[topic] != value
+	ok, reason := b.gate.shouldSend(topic, value, time.Now())
+	if ok && reason != "erster Wert" && reason != "geaendert" {
+		log.Printf("bridge: %s = %s erneut senden (%s)", topic, value, reason)
+	}
+	return ok
 }
 
-// markSent schreibt den Wert erst NACH einem erfolgreich durchgefuehrten
-// REST-Call fest - siehe Kommentar an shouldSend().
 func (b *Bridge) markSent(topic, value string) {
-	b.dedupeMu.Lock()
-	b.lastSent[topic] = value
-	b.dedupeMu.Unlock()
+	b.gate.markSent(topic, value, time.Now())
 }
 
 // Connect baut die MQTT-Verbindung auf (mit LWT auf <prefix>bridge/status)
@@ -499,6 +477,14 @@ func (b *Bridge) floatHandler(chargerID, label string, fn func(ctx context.Conte
 // Dank der vollstaendigen observationTopics-Tabelle sollte hier im
 // Normalfall keine ID mehr als "unbekannt" auftauchen.
 func (b *Bridge) HandleObservation(obs easee.Observation) {
+	// Ist-Wert fuer den set/*-Abgleich merken (siehe dedupe.go) - bewusst VOR
+	// dem Publish-Filter, damit der Abgleich auch funktioniert, wenn die
+	// Observation in der UI abgewaehlt ist.
+	if st, ok := observedSetting[obs.ID]; ok {
+		if v, ok := normalize(st.kind, obs.Value); ok {
+			b.gate.observe(b.prefix+obs.ChargerID+"/set/"+st.set, v)
+		}
+	}
 	suffix, known := observationTopics[obs.ID]
 	if !known {
 		if !b.warnedUnknown[obs.ID] {
