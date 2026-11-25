@@ -273,7 +273,15 @@ type Bridge struct {
 
 	// amps drosselt set/dynamic_current (siehe throttle.go).
 	amps *ampThrottle
+
+	// signalrState: letzter bekannter Zustand der Easee-Cloud-Verbindung
+	// ("" = noch unbekannt), fuer <prefix>bridge/signalr.
+	stateMu      sync.Mutex
+	signalrState string
 }
+
+// heartbeatInterval: Abstand fuer <prefix>bridge/heartbeat.
+const heartbeatInterval = 60 * time.Second
 
 func New(cfg *config.Config, rest restCommander) *Bridge {
 	var filter map[int]bool
@@ -362,6 +370,15 @@ func (b *Bridge) Connect() error {
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
 		log.Printf("mqtt: verbunden (%s:%d)", b.cfg.MQTT.Host, b.cfg.MQTT.Port)
 		c.Publish(statusTopic, 1, true, "online")
+		// SignalR-Zustand erneut setzen (retained, ging z.B. bei einem
+		// Broker-Neustart ohne Persistenz verloren)
+		b.stateMu.Lock()
+		st := b.signalrState
+		b.stateMu.Unlock()
+		if st != "" {
+			c.Publish(b.prefix+"bridge/signalr", 1, true, st)
+		}
+		b.publishHeartbeat(c)
 		b.subscribeCommands(c)
 	})
 	opts.SetConnectionLostHandler(func(c mqtt.Client, err error) {
@@ -370,6 +387,7 @@ func (b *Bridge) Connect() error {
 
 	b.startWorkers()
 	b.client = mqtt.NewClient(opts)
+	go b.heartbeatLoop()
 	token := b.client.Connect()
 	token.Wait()
 	return token.Error()
@@ -566,8 +584,55 @@ func (b *Bridge) HandleObservation(obs easee.Observation) {
 	b.client.Publish(topic, 0, true, obs.Value)
 }
 
+// HandleSignalRState wird von easee.Hub bei jedem Zustandswechsel der
+// Cloud-Verbindung aufgerufen. <prefix>bridge/signalr (retained) =
+// connected/disconnected. Ergaenzt bridge/status (Last-Will, zeigt nur, ob
+// der Daemon selbst laeuft): ohne SignalR kommen keine Werte von der Wallbox
+// mehr, auch wenn der Daemon und MQTT laufen.
+func (b *Bridge) HandleSignalRState(connected bool) {
+	st := "disconnected"
+	if connected {
+		st = "connected"
+	}
+	b.stateMu.Lock()
+	changed := b.signalrState != st
+	b.signalrState = st
+	b.stateMu.Unlock()
+	if changed {
+		log.Printf("bridge: Easee-Cloud (SignalR) %s", st)
+	}
+	if b.client != nil && b.client.IsConnected() {
+		b.client.Publish(b.prefix+"bridge/signalr", 1, true, st)
+	}
+}
+
+// heartbeatLoop publiziert alle heartbeatInterval die aktuelle Unix-Zeit auf
+// <prefix>bridge/heartbeat (NICHT retained - ein alter Wert darf nach einem
+// Absturz nicht wie ein Lebenszeichen aussehen). In Loxone per Watchdog
+// ueberwachen: bleibt der Wert stehen, haengt der Daemon.
+func (b *Bridge) heartbeatLoop() {
+	t := time.NewTicker(heartbeatInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-b.done:
+			return
+		case <-t.C:
+			if b.client != nil && b.client.IsConnected() {
+				b.publishHeartbeat(b.client)
+			}
+		}
+	}
+}
+
+func (b *Bridge) publishHeartbeat(c mqtt.Client) {
+	c.Publish(b.prefix+"bridge/heartbeat", 0, false, strconv.FormatInt(time.Now().Unix(), 10))
+}
+
 func (b *Bridge) Disconnect() {
 	if b.client != nil && b.client.IsConnected() {
+		// geordnetes Beenden: Cloud-Status nicht als "connected" stehen lassen
+		b.client.Publish(b.prefix+"bridge/signalr", 1, true, "disconnected").WaitTimeout(time.Second)
 		b.client.Disconnect(250)
 	}
 	close(b.done) // Worker beenden (laufende REST-Calls enden per Timeout)

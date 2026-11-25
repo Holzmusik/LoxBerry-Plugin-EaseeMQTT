@@ -51,7 +51,9 @@ vollständige, verbindliche Liste). Die alltagsrelevantesten:
 <prefix><charger_id>/state/in_volt_t1_t2 .. in_volt_t4_t5  Netzspannungen zwischen den Terminals (Rohbenennung)
 <prefix><charger_id>/state/temp_max                        Temperaturüberwachung
 ... (alle weiteren 150+ IDs ebenso, siehe observationTopics in bridge.go)
-<prefix>bridge/status   (online/offline, Last-Will des Daemons selbst)
+<prefix>bridge/status     (online/offline, Last-Will des Daemons selbst)
+<prefix>bridge/signalr    (connected/disconnected, retained: Verbindung zur Easee-Cloud)
+<prefix>bridge/heartbeat  (Unix-Zeit alle 60 s, nicht retained - per Watchdog in Loxone überwachen)
 ```
 
 **Kommandos (Loxone -> Daemon)** - komplettes Kommando-Set:

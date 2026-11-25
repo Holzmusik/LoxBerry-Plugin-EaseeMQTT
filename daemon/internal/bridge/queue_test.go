@@ -224,3 +224,15 @@ func TestRetainedCmdIgnored(t *testing.T) {
 		t.Fatalf("calls = %+v, retained reboot haette ignoriert werden muessen", calls)
 	}
 }
+
+func TestSignalRStateWithoutMQTT(t *testing.T) {
+	b := New(testConfig(), newMockRest())
+	b.HandleSignalRState(true) // ohne MQTT-Client: nur merken, kein Panic
+	if b.signalrState != "connected" {
+		t.Fatalf("state = %q", b.signalrState)
+	}
+	b.HandleSignalRState(false)
+	if b.signalrState != "disconnected" {
+		t.Fatalf("state = %q", b.signalrState)
+	}
+}

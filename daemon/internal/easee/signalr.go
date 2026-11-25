@@ -39,6 +39,11 @@ type Observation struct {
 // via philippseith/signalr's WithConnector/WithBackoff, siehe Run()) und
 // meldet jedes empfangene Observation-Event an onObservation.
 type Hub struct {
+	// OnState (optional, vor Run() setzen) wird bei jedem Zustandswechsel der
+	// SignalR-Verbindung aufgerufen: true = verbunden, false = alles andere
+	// (verbindet gerade, getrennt). Fuer <prefix>bridge/signalr.
+	OnState func(connected bool)
+
 	auth          *Auth
 	chargerIDs    []string
 	onObservation func(Observation)
@@ -252,6 +257,9 @@ func (h *Hub) Run(ctx context.Context) error {
 
 	go func() {
 		for state := range stateCh {
+			if h.OnState != nil {
+				h.OnState(state == signalr.ClientConnected)
+			}
 			if state != signalr.ClientConnected {
 				continue
 			}

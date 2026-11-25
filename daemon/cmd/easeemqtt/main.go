@@ -142,6 +142,7 @@ func main() {
 		chargerIDs = append(chargerIDs, ch.ID)
 	}
 	hub := easee.NewHub(auth, chargerIDs, br.HandleObservation, logLevel)
+	hub.OnState = br.HandleSignalRState
 
 	log.Printf("easeemqtt gestartet - %d Charger, MQTT-Prefix %q", len(chargerIDs), cfg.MQTT.TopicPrefix)
 

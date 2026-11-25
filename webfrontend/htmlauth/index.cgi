@@ -314,10 +314,12 @@ print <<'HTML';
         Bis zu 170 verschiedene Status-Werte pro Wallbox sind möglich -
         welche davon tatsächlich publiziert werden (und damit unten in der
         Tabelle auftauchen), wählst du auf der <strong>"Daten"</strong>-Seite
-        aus. <code>&lt;prefix&gt;bridge/status</code> (online/offline) ist der
-        Last-Will-Status des Dienstes selbst und erscheint deshalb nicht in
-        der Tabelle - falls gewünscht, dafür einen eigenen Virtuellen
-        Eingang/UDP-Befehl nach demselben Muster von Hand anlegen.
+        aus. Die Dienst-Topics erscheinen nicht in der Tabelle - falls gewünscht,
+        dafür eigene Virtuelle Eingänge/UDP-Befehle nach demselben Muster von Hand anlegen:
+        <code>&lt;prefix&gt;bridge/status</code> (online/offline, Last-Will des Dienstes),
+        <code>&lt;prefix&gt;bridge/signalr</code> (connected/disconnected, Verbindung zur Easee-Cloud) und
+        <code>&lt;prefix&gt;bridge/heartbeat</code> (Unix-Zeit alle 60 s - bleibt der Wert stehen,
+        hängt der Dienst; in Loxone per Watchdog überwachen).
       </div>
       <div class="divider"></div>
       <div class="row">
