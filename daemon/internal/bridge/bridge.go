@@ -11,6 +11,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -263,6 +264,12 @@ type Bridge struct {
 	// durch, wenn die Wallbox per Observation etwas anderes meldet oder der
 	// letzte Call laenger her ist. Siehe dedupe.go.
 	gate *sendGate
+
+	// Ein Worker pro Charger (siehe queue.go): MQTT-Handler legen nur ab,
+	// die REST-Calls laufen ausserhalb von paho.
+	queues    map[string]*chargerQueue
+	startOnce sync.Once
+	done      chan struct{}
 }
 
 func New(cfg *config.Config, rest restCommander) *Bridge {
@@ -273,6 +280,10 @@ func New(cfg *config.Config, rest restCommander) *Bridge {
 			filter[id] = true
 		}
 	}
+	queues := make(map[string]*chargerQueue, len(cfg.Easee.Chargers))
+	for _, ch := range cfg.Easee.Chargers {
+		queues[ch.ID] = newChargerQueue()
+	}
 	return &Bridge{
 		cfg:           cfg,
 		rest:          rest,
@@ -280,8 +291,33 @@ func New(cfg *config.Config, rest restCommander) *Bridge {
 		filter:        filter,
 		warnedUnknown: map[int]bool{},
 		gate:          newSendGate(),
+		queues:        queues,
+		done:          make(chan struct{}),
 	}
 }
+
+// startWorkers startet je Charger eine Goroutine fuer dessen Warteschlange.
+func (b *Bridge) startWorkers() {
+	b.startOnce.Do(func() {
+		for _, q := range b.queues {
+			go q.loop(b.done)
+		}
+	})
+}
+
+// enqueue legt eine Aktion in die Warteschlange des Chargers. key != ""
+// fasst wartende Aktionen desselben Topics zusammen (letzter Wert gewinnt).
+func (b *Bridge) enqueue(chargerID, key string, run func()) {
+	q, ok := b.queues[chargerID]
+	if !ok {
+		log.Printf("bridge: unbekannter Charger %s - Kommando verworfen", chargerID)
+		return
+	}
+	q.push(&job{key: key, run: run})
+}
+
+// restTimeout begrenzt jeden einzelnen REST-Call.
+const restTimeout = 15 * time.Second
 
 // shouldSend/markSent: duenne Huellen um sendGate (siehe dedupe.go). Wichtig
 // bleibt die Trennung: pruefen VOR dem REST-Call, festschreiben NUR nach
@@ -324,6 +360,7 @@ func (b *Bridge) Connect() error {
 		log.Printf("mqtt: Verbindung verloren: %v", err)
 	})
 
+	b.startWorkers()
 	b.client = mqtt.NewClient(opts)
 	token := b.client.Connect()
 	token.Wait()
@@ -373,13 +410,15 @@ func (b *Bridge) cmdHandler(chargerID, label string, fn func(ctx context.Context
 			log.Printf("bridge: %s ist retained - Kommando ignoriert (bitte ohne Retain publizieren)", msg.Topic())
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := fn(ctx, chargerID); err != nil {
-			log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
-		} else {
-			log.Printf("bridge: %s -> %s ausgefuehrt", label, chargerID)
-		}
+		b.enqueue(chargerID, "", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), restTimeout)
+			defer cancel()
+			if err := fn(ctx, chargerID); err != nil {
+				log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
+			} else {
+				log.Printf("bridge: %s -> %s ausgefuehrt", label, chargerID)
+			}
+		})
 	}
 }
 
@@ -406,17 +445,22 @@ func (b *Bridge) boolHandler(chargerID, label string, fn func(ctx context.Contex
 			return
 		}
 		valStr := strconv.FormatBool(v)
-		if !b.shouldSend(msg.Topic(), valStr) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := fn(ctx, chargerID, v); err != nil {
-			log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
-		} else {
-			b.markSent(msg.Topic(), valStr)
-			log.Printf("bridge: %s fuer %s auf %v gesetzt", label, chargerID, v)
-		}
+		topic := msg.Topic()
+		// Pruefen + Senden erst im Worker: so gilt der Abgleich fuer den
+		// Wert, der nach dem Zusammenfassen tatsaechlich an der Reihe ist.
+		b.enqueue(chargerID, topic, func() {
+			if !b.shouldSend(topic, valStr) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), restTimeout)
+			defer cancel()
+			if err := fn(ctx, chargerID, v); err != nil {
+				log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
+			} else {
+				b.markSent(topic, valStr)
+				log.Printf("bridge: %s fuer %s auf %v gesetzt", label, chargerID, v)
+			}
+		})
 	}
 }
 
@@ -428,17 +472,22 @@ func (b *Bridge) intHandler(chargerID, label string, fn func(ctx context.Context
 			return
 		}
 		valStr := strconv.Itoa(v)
-		if !b.shouldSend(msg.Topic(), valStr) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := fn(ctx, chargerID, v); err != nil {
-			log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
-		} else {
-			b.markSent(msg.Topic(), valStr)
-			log.Printf("bridge: %s fuer %s auf %d gesetzt", label, chargerID, v)
-		}
+		topic := msg.Topic()
+		// Pruefen + Senden erst im Worker: so gilt der Abgleich fuer den
+		// Wert, der nach dem Zusammenfassen tatsaechlich an der Reihe ist.
+		b.enqueue(chargerID, topic, func() {
+			if !b.shouldSend(topic, valStr) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), restTimeout)
+			defer cancel()
+			if err := fn(ctx, chargerID, v); err != nil {
+				log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
+			} else {
+				b.markSent(topic, valStr)
+				log.Printf("bridge: %s fuer %s auf %d gesetzt", label, chargerID, v)
+			}
+		})
 	}
 }
 
@@ -457,17 +506,22 @@ func (b *Bridge) floatHandler(chargerID, label string, fn func(ctx context.Conte
 		// Unterschiede faelschlich als echte Aenderung werten und den
 		// Dedupe-Schutz aushebeln.
 		valStr := strconv.FormatFloat(v, 'f', 2, 64)
-		if !b.shouldSend(msg.Topic(), valStr) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := fn(ctx, chargerID, v); err != nil {
-			log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
-		} else {
-			b.markSent(msg.Topic(), valStr)
-			log.Printf("bridge: %s fuer %s auf %.1f gesetzt", label, chargerID, v)
-		}
+		topic := msg.Topic()
+		// Pruefen + Senden erst im Worker: so gilt der Abgleich fuer den
+		// Wert, der nach dem Zusammenfassen tatsaechlich an der Reihe ist.
+		b.enqueue(chargerID, topic, func() {
+			if !b.shouldSend(topic, valStr) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), restTimeout)
+			defer cancel()
+			if err := fn(ctx, chargerID, v); err != nil {
+				log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
+			} else {
+				b.markSent(topic, valStr)
+				log.Printf("bridge: %s fuer %s auf %.1f gesetzt", label, chargerID, v)
+			}
+		})
 	}
 }
 
@@ -510,4 +564,5 @@ func (b *Bridge) Disconnect() {
 	if b.client != nil && b.client.IsConnected() {
 		b.client.Disconnect(250)
 	}
+	close(b.done) // Worker beenden (laufende REST-Calls enden per Timeout)
 }
