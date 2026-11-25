@@ -141,6 +141,7 @@ func main() {
 	for _, ch := range cfg.Easee.Chargers {
 		chargerIDs = append(chargerIDs, ch.ID)
 	}
+	br.DebugEnabled = func() bool { return logLevel.Enabled(loxberrylog.LevelDebug) }
 	hub := easee.NewHub(auth, chargerIDs, br.HandleObservation, logLevel)
 	hub.OnState = br.HandleSignalRState
 

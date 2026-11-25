@@ -278,6 +278,11 @@ type Bridge struct {
 	// ("" = noch unbekannt), fuer <prefix>bridge/signalr.
 	stateMu      sync.Mutex
 	signalrState string
+
+	// DebugEnabled (optional, von main.go gesetzt): true, wenn in LoxBerrys
+	// Plugin-Verwaltung der Log-Level "Debug" gewaehlt ist - dann wird jede
+	// empfangene Observation protokolliert (siehe logObservation).
+	DebugEnabled func() bool
 }
 
 // heartbeatInterval: Abstand fuer <prefix>bridge/heartbeat.
@@ -581,6 +586,7 @@ func (b *Bridge) HandleObservation(obs easee.Observation) {
 	}
 	suffix, known := observationTopics[obs.ID]
 	if !known {
+		b.logObservation(obs, "?", "unbekannte ID")
 		if !b.warnedUnknown[obs.ID] {
 			b.warnedUnknown[obs.ID] = true
 			log.Printf("bridge: unbekannte Observation-ID %d (Charger %s, Wert %q) - wird ignoriert", obs.ID, obs.ChargerID, obs.Value)
@@ -591,13 +597,30 @@ func (b *Bridge) HandleObservation(obs easee.Observation) {
 	// EnabledObservations) - bewusst OHNE Log-Meldung, das ist beabsichtigte
 	// Filterung, kein Fehlerfall wie bei "unbekannter" ID oben.
 	if b.filter != nil && !b.filter[obs.ID] {
+		b.logObservation(obs, suffix, "nicht ausgewaehlt")
 		return
 	}
 	if b.client == nil || !b.client.IsConnected() {
+		b.logObservation(obs, suffix, "MQTT getrennt, verworfen")
 		return
 	}
+	b.logObservation(obs, suffix, "publiziert")
 	topic := b.prefix + obs.ChargerID + "/state/" + suffix
 	b.client.Publish(topic, 0, true, obs.Value)
+}
+
+// logObservation: eine Zeile pro empfangener Observation, nur bei LoxBerry-
+// Log-Level "Debug" - zur Klaerung, ob und wie oft Easee einen Wert fuer
+// welche Box ueberhaupt schickt. Personenbezogene Werte werden maskiert.
+func (b *Bridge) logObservation(obs easee.Observation, name, outcome string) {
+	if b.DebugEnabled == nil || !b.DebugEnabled() {
+		return
+	}
+	val := obs.Value
+	if sensitiveObservations[obs.ID] {
+		val = "<maskiert>"
+	}
+	log.Printf("obs: %s id=%d %s = %q (%s)", obs.ChargerID, obs.ID, name, val, outcome)
 }
 
 // HandleSignalRState wird von easee.Hub bei jedem Zustandswechsel der
