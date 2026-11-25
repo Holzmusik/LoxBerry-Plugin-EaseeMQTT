@@ -385,6 +385,16 @@ func (b *Bridge) subscribeCommands(c mqtt.Client) {
 
 func (b *Bridge) cmdHandler(chargerID, label string, fn func(ctx context.Context, chargerID string) error) mqtt.MessageHandler {
 	return func(c mqtt.Client, msg mqtt.Message) {
+		// Retained-Kommandos verwerfen: ein (versehentlich) retained
+		// publiziertes cmd/start, cmd/reboot o.ae. liefert der Broker bei
+		// JEDEM (Re-)Connect erneut aus - das Kommando wuerde dann nach jedem
+		// Neustart des Daemons oder Brokers wieder ausgefuehrt. Die
+		// set/*-Topics sind davon bewusst ausgenommen: ein retained Sollwert
+		// ist ein gewuenschter Zustand, kein Ereignis.
+		if msg.Retained() {
+			log.Printf("bridge: %s ist retained - Kommando ignoriert (bitte ohne Retain publizieren)", msg.Topic())
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := fn(ctx, chargerID); err != nil {
