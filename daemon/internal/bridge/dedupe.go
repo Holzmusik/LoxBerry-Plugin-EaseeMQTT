@@ -26,14 +26,14 @@ var observedSetting = map[int]struct {
 	set  string
 	kind valueKind
 }{
-	30:  {"cable_lock", kindBool},       // lock_cable_permanently
-	31:  {"enabled", kindBool},          // is_enabled
-	37:  {"idle_current", kindBool},     // enable_idle_current
-	38:  {"phase_mode", kindInt},        // phase_mode
-	40:  {"led_brightness", kindInt},    // led_strip_brightness
-	47:  {"max_current", kindInt},       // max_current_a
-	48:  {"dynamic_current", kindFloat}, // dynamic_current_a
-	102: {"smart_charging", kindBool},   // smart_charging
+	30:  {"cable_lock", kindBool},     // lock_cable_permanently
+	31:  {"enabled", kindBool},        // is_enabled
+	37:  {"idle_current", kindBool},   // enable_idle_current
+	38:  {"phase_mode", kindInt},      // phase_mode
+	40:  {"led_brightness", kindInt},  // led_strip_brightness
+	47:  {"max_current", kindInt},     // max_current_a
+	48:  {"dynamic_current", kindInt}, // dynamic_current_a
+	102: {"smart_charging", kindBool}, // smart_charging
 }
 
 // normalize bringt einen Wert in die Form, in der die set/*-Handler ihn

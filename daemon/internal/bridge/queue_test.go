@@ -95,7 +95,7 @@ func (m *mockRest) Reboot(ctx context.Context, id string) error { return m.rec(c
 func (m *mockRest) OverrideSchedule(ctx context.Context, id string) error {
 	return m.rec(ctx, id, "override", nil)
 }
-func (m *mockRest) SetDynamicCurrent(ctx context.Context, id string, a float64) error {
+func (m *mockRest) SetDynamicCurrent(ctx context.Context, id string, a int) error {
 	return m.rec(ctx, id, "dynamic", a)
 }
 func (m *mockRest) SetMaxCurrent(ctx context.Context, id string, a int) error {

@@ -129,7 +129,10 @@ func (c *Client) ResumeCharging(ctx context.Context, chargerID string) error {
 // Easee-Cloud den Request ohne HTTP-Fehler an, ignorierte aber die
 // unbekannten Felder - daher kein Fehler im Log, aber wirkungslos.
 // minutes=0 bedeutet "bis zur naechsten Aenderung gueltig" (kein TTL).
-func (c *Client) SetDynamicCurrent(ctx context.Context, chargerID string, amps float64) error {
+//
+// amps als Ganzzahl (int), wie in der Easee-Referenz angegeben - frueher
+// wurde ein float gesendet (z.B. 13.7). Die Bridge rundet vorher ab.
+func (c *Client) SetDynamicCurrent(ctx context.Context, chargerID string, amps int) error {
 	body := map[string]any{
 		"amps":    amps,
 		"minutes": 0,

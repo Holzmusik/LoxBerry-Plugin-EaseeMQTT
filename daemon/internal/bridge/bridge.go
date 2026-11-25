@@ -233,7 +233,7 @@ type restCommander interface {
 	ToggleCharging(ctx context.Context, chargerID string) error
 	Reboot(ctx context.Context, chargerID string) error
 	OverrideSchedule(ctx context.Context, chargerID string) error
-	SetDynamicCurrent(ctx context.Context, chargerID string, amps float64) error
+	SetDynamicCurrent(ctx context.Context, chargerID string, amps int) error
 	SetMaxCurrent(ctx context.Context, chargerID string, amps int) error
 	SetEnabled(ctx context.Context, chargerID string, enabled bool) error
 	LockCablePermanently(ctx context.Context, chargerID string, lock bool) error
@@ -270,6 +270,9 @@ type Bridge struct {
 	queues    map[string]*chargerQueue
 	startOnce sync.Once
 	done      chan struct{}
+
+	// amps drosselt set/dynamic_current (siehe throttle.go).
+	amps *ampThrottle
 }
 
 func New(cfg *config.Config, rest restCommander) *Bridge {
@@ -279,6 +282,10 @@ func New(cfg *config.Config, rest restCommander) *Bridge {
 		for _, id := range cfg.MQTT.EnabledObservations {
 			filter[id] = true
 		}
+	}
+	ampInterval := config.DefaultDynamicCurrentIntervalS
+	if cfg.Easee.DynamicCurrentIntervalS != nil {
+		ampInterval = *cfg.Easee.DynamicCurrentIntervalS
 	}
 	queues := make(map[string]*chargerQueue, len(cfg.Easee.Chargers))
 	for _, ch := range cfg.Easee.Chargers {
@@ -293,6 +300,7 @@ func New(cfg *config.Config, rest restCommander) *Bridge {
 		gate:          newSendGate(),
 		queues:        queues,
 		done:          make(chan struct{}),
+		amps:          newAmpThrottle(time.Duration(ampInterval) * time.Second),
 	}
 }
 
@@ -386,7 +394,7 @@ func (b *Bridge) subscribeCommands(c mqtt.Client) {
 		c.Subscribe(base+"cmd/override_schedule", 1, b.cmdHandler(chargerID, "override_schedule", b.rest.OverrideSchedule))
 
 		// Werte-Kommandos (Payload traegt den zu setzenden Wert).
-		c.Subscribe(base+"set/dynamic_current", 1, b.floatHandler(chargerID, "set_dynamic_charger_current", b.rest.SetDynamicCurrent))
+		c.Subscribe(base+"set/dynamic_current", 1, b.ampsHandler(chargerID, "set_dynamic_charger_current", b.rest.SetDynamicCurrent))
 		c.Subscribe(base+"set/max_current", 1, b.intHandler(chargerID, "set_max_charger_current", b.rest.SetMaxCurrent))
 		c.Subscribe(base+"set/enabled", 1, b.boolHandler(chargerID, "enable_charger", b.rest.SetEnabled))
 		c.Subscribe(base+"set/cable_lock", 1, b.boolHandler(chargerID, "lock_cable_permanently", b.rest.LockCablePermanently))
@@ -491,36 +499,34 @@ func (b *Bridge) intHandler(chargerID, label string, fn func(ctx context.Context
 	}
 }
 
-func (b *Bridge) floatHandler(chargerID, label string, fn func(ctx context.Context, chargerID string, v float64) error) mqtt.MessageHandler {
+// ampsHandler fuer set/dynamic_current: auf ganze Ampere abrunden (die API
+// erwartet int, Loxone liefert Bruchteile), dann ueber ampThrottle drosseln
+// - Erhoehungen hoechstens alle dynamic_current_interval_s Sekunden,
+// Absenkungen und 0 sofort (siehe throttle.go).
+func (b *Bridge) ampsHandler(chargerID, label string, fn func(ctx context.Context, chargerID string, v int) error) mqtt.MessageHandler {
 	return func(c mqtt.Client, msg mqtt.Message) {
-		v, err := strconv.ParseFloat(strings.TrimSpace(string(msg.Payload())), 64)
+		v, err := parseAmps(string(msg.Payload()))
 		if err != nil {
-			log.Printf("bridge: %s: Payload %q ist keine Zahl: %v", msg.Topic(), string(msg.Payload()), err)
+			log.Printf("bridge: %s: Payload %q ist keine Zahl", msg.Topic(), string(msg.Payload()))
 			return
 		}
-		// FormatFloat mit fester Genauigkeit (2 Nachkommastellen): Loxone
-		// schickt bei einer Gleitkommaregelung leicht unterschiedliche
-		// Repraesentationen desselben Werts (z.B. "16" vs "16.0" vs
-		// "16.00001" durch Rundungsrauschen) - ohne feste Formatierung
-		// wuerde der String-Vergleich in shouldSend() solche Mikro-
-		// Unterschiede faelschlich als echte Aenderung werten und den
-		// Dedupe-Schutz aushebeln.
-		valStr := strconv.FormatFloat(v, 'f', 2, 64)
 		topic := msg.Topic()
-		// Pruefen + Senden erst im Worker: so gilt der Abgleich fuer den
-		// Wert, der nach dem Zusammenfassen tatsaechlich an der Reihe ist.
-		b.enqueue(chargerID, topic, func() {
-			if !b.shouldSend(topic, valStr) {
-				return
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), restTimeout)
-			defer cancel()
-			if err := fn(ctx, chargerID, v); err != nil {
-				log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
-			} else {
-				b.markSent(topic, valStr)
-				log.Printf("bridge: %s fuer %s auf %.1f gesetzt", label, chargerID, v)
-			}
+		b.amps.submit(topic, v, time.Now(), func(v int) {
+			valStr := strconv.Itoa(v)
+			b.enqueue(chargerID, topic, func() {
+				if !b.shouldSend(topic, valStr) {
+					return
+				}
+				b.amps.sent(topic, v, time.Now())
+				ctx, cancel := context.WithTimeout(context.Background(), restTimeout)
+				defer cancel()
+				if err := fn(ctx, chargerID, v); err != nil {
+					log.Printf("bridge: %s fuer %s fehlgeschlagen: %v", label, chargerID, err)
+				} else {
+					b.markSent(topic, valStr)
+					log.Printf("bridge: %s fuer %s auf %d A gesetzt", label, chargerID, v)
+				}
+			})
 		})
 	}
 }

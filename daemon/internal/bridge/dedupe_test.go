@@ -39,14 +39,14 @@ const k = "easee/EH1/set/dynamic_current"
 func TestGateFirstAndChange(t *testing.T) {
 	g := newSendGate()
 	t0 := time.Unix(1000, 0)
-	if ok, _ := g.shouldSend(k, "16.00", t0); !ok {
+	if ok, _ := g.shouldSend(k, "16", t0); !ok {
 		t.Fatal("erster Wert muss gesendet werden")
 	}
-	g.markSent(k, "16.00", t0)
-	if ok, _ := g.shouldSend(k, "16.00", t0.Add(time.Second)); ok {
+	g.markSent(k, "16", t0)
+	if ok, _ := g.shouldSend(k, "16", t0.Add(time.Second)); ok {
 		t.Fatal("unveraenderter Wert darf nicht erneut gesendet werden")
 	}
-	if ok, _ := g.shouldSend(k, "10.00", t0.Add(time.Second)); !ok {
+	if ok, _ := g.shouldSend(k, "10", t0.Add(time.Second)); !ok {
 		t.Fatal("geaenderter Wert muss gesendet werden")
 	}
 }
@@ -54,8 +54,8 @@ func TestGateFirstAndChange(t *testing.T) {
 func TestGateFailedCallIsNotMarked(t *testing.T) {
 	g := newSendGate()
 	t0 := time.Unix(1000, 0)
-	g.shouldSend(k, "16.00", t0) // Call schlaegt fehl -> kein markSent
-	if ok, _ := g.shouldSend(k, "16.00", t0.Add(time.Second)); !ok {
+	g.shouldSend(k, "16", t0) // Call schlaegt fehl -> kein markSent
+	if ok, _ := g.shouldSend(k, "16", t0.Add(time.Second)); !ok {
 		t.Fatal("nach fehlgeschlagenem Call muss derselbe Wert erneut gesendet werden")
 	}
 }
@@ -65,20 +65,20 @@ func TestGateFailedCallIsNotMarked(t *testing.T) {
 func TestGateObservedDiffers(t *testing.T) {
 	g := newSendGate()
 	t0 := time.Unix(1000, 0)
-	g.markSent(k, "16.00", t0)
-	g.observe(k, "16.00")
-	if ok, _ := g.shouldSend(k, "16.00", t0.Add(2*time.Minute)); ok {
+	g.markSent(k, "16", t0)
+	g.observe(k, "16")
+	if ok, _ := g.shouldSend(k, "16", t0.Add(2*time.Minute)); ok {
 		t.Fatal("Ist = Soll: nicht senden")
 	}
-	g.observe(k, "32.00") // Wallbox nach Neustart
-	if ok, _ := g.shouldSend(k, "16.00", t0.Add(30*time.Second)); ok {
+	g.observe(k, "32") // Wallbox nach Neustart
+	if ok, _ := g.shouldSend(k, "16", t0.Add(30*time.Second)); ok {
 		t.Fatal("innerhalb der Karenzzeit nach dem Senden nicht erneut senden")
 	}
-	ok, reason := g.shouldSend(k, "16.00", t0.Add(2*time.Minute))
+	ok, reason := g.shouldSend(k, "16", t0.Add(2*time.Minute))
 	if !ok {
 		t.Fatal("Ist != Soll nach Karenzzeit: senden")
 	}
-	if reason != "Wallbox meldet 32.00" {
+	if reason != "Wallbox meldet 32" {
 		t.Errorf("reason = %q", reason)
 	}
 }
@@ -86,11 +86,11 @@ func TestGateObservedDiffers(t *testing.T) {
 func TestGateTTL(t *testing.T) {
 	g := newSendGate()
 	t0 := time.Unix(1000, 0)
-	g.markSent(k, "16.00", t0)
-	if ok, _ := g.shouldSend(k, "16.00", t0.Add(9*time.Minute)); ok {
+	g.markSent(k, "16", t0)
+	if ok, _ := g.shouldSend(k, "16", t0.Add(9*time.Minute)); ok {
 		t.Fatal("vor Ablauf der TTL nicht senden")
 	}
-	if ok, _ := g.shouldSend(k, "16.00", t0.Add(10*time.Minute)); !ok {
+	if ok, _ := g.shouldSend(k, "16", t0.Add(10*time.Minute)); !ok {
 		t.Fatal("nach Ablauf der TTL erneut senden")
 	}
 }
@@ -101,7 +101,7 @@ func TestObservationFeedsGate(t *testing.T) {
 	b.HandleObservation(obs("EH1", 31, "False"))
 	b.gate.mu.Lock()
 	defer b.gate.mu.Unlock()
-	if got := b.gate.observed["easee/EH1/set/dynamic_current"]; got != "32.00" {
+	if got := b.gate.observed["easee/EH1/set/dynamic_current"]; got != "32" { // "32.0" -> ganzzahlig
 		t.Errorf("dynamic_current beobachtet = %q", got)
 	}
 	if got := b.gate.observed["easee/EH1/set/enabled"]; got != "false" {

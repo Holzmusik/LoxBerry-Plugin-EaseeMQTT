@@ -229,6 +229,13 @@ print <<'HTML';
           <tbody id="charger-tbody"></tbody>
         </table>
       </div>
+      <div class="field" style="margin-top:14px">
+        <label>Dynamic Current: Mindestabstand zwischen Erhöhungen (Sekunden, 0 = aus)</label>
+        <input type="number" id="dynamic_current_interval_s" data-role="none" min="0" placeholder="30">
+        <div class="hint">Schützt vor dem Easee-Rate-Limit, wenn Loxone den Wert fast sekündlich ändert.
+          Werte werden auf ganze Ampere abgerundet. Absenkungen und 0 gehen immer sofort raus,
+          bei Erhöhungen wird nach Ablauf der zuletzt gewünschte Wert nachgesendet.</div>
+      </div>
       <div class="btn-group">
         <button class="btn btn-secondary btn-sm" onclick="addChargerRow()">+ Zeile</button>
         <button class="btn btn-primary" onclick="saveConfig()">Speichern</button>
@@ -416,7 +423,7 @@ let FOUND_CHARGERS = [];
 // Build-Marker: von Hand hochzählen bei relevanten Änderungen - gleiche
 // Debug-Infrastruktur wie KNXtoLOX (dort entscheidend fürs schnelle
 // Fehler-Isolieren auf echter Hardware).
-const UI_BUILD = '2026-09-08-02';
+const UI_BUILD = '2026-11-25-1';
 console.log('[EaseeMQTT] index.cgi UI_BUILD=' + UI_BUILD);
 
 const CLIENT_LOG = [];
@@ -762,6 +769,11 @@ function currentConfigForm() {
       username: document.getElementById('easee_username').value,
       password: document.getElementById('easee_password').value,
       chargers: collectChargerRowsFromDom(),
+      dynamic_current_interval_s: (() => {
+        const v = document.getElementById('dynamic_current_interval_s').value.trim();
+        const n = parseInt(v, 10);
+        return v === '' || !Number.isFinite(n) || n < 0 ? 30 : n;
+      })(),
     },
     mqtt: {
       use_local_broker: isToggled('use_local_broker'),
@@ -788,6 +800,8 @@ function fillConfigForm(c) {
   document.getElementById('easee_password').placeholder = e.password_set ? 'gespeichert - leer lassen zum Beibehalten' : '';
   CHARGER_ROWS = e.chargers || [];
   renderChargerTable();
+  document.getElementById('dynamic_current_interval_s').value =
+    (e.dynamic_current_interval_s === undefined || e.dynamic_current_interval_s === null) ? 30 : e.dynamic_current_interval_s;
 
   const m = c.mqtt || {};
   setToggled('use_local_broker', m.use_local_broker !== false);

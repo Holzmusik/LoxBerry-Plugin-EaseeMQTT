@@ -23,7 +23,17 @@ type EaseeConfig struct {
 	Username string    `json:"username"`
 	Password string    `json:"password"`
 	Chargers []Charger `json:"chargers"`
+
+	// DynamicCurrentIntervalS: Mindestabstand in Sekunden zwischen zwei
+	// ERHOEHUNGEN von set/dynamic_current pro Charger (Absenkungen und 0
+	// gehen immer sofort raus, siehe bridge/throttle.go). Zeiger, damit
+	// "fehlt in config.json" (-> Standard 30) von "0 = Drosselung aus"
+	// unterscheidbar ist.
+	DynamicCurrentIntervalS *int `json:"dynamic_current_interval_s"`
 }
+
+// DefaultDynamicCurrentIntervalS gilt, wenn config.json das Feld nicht enthaelt.
+const DefaultDynamicCurrentIntervalS = 30
 
 // MQTTConfig traegt IMMER die tatsaechlich zu verwendenden Broker-Werte -
 // ob sie vom lokalen LoxBerry-Mosquitto (general.json) oder manuell von
@@ -91,6 +101,10 @@ func Load(path string) (*Config, error) {
 	}
 	if c.MQTT.Host == "" {
 		return nil, fmt.Errorf("config.json: mqtt.host ist leer - lokalen Broker aktivieren oder externen Broker eintragen")
+	}
+	if c.Easee.DynamicCurrentIntervalS == nil {
+		d := DefaultDynamicCurrentIntervalS
+		c.Easee.DynamicCurrentIntervalS = &d
 	}
 	if c.MQTT.Port == 0 {
 		c.MQTT.Port = 1883

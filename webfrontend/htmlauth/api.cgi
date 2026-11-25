@@ -179,7 +179,10 @@ my @DEFAULT_ENABLED_OBSERVATIONS = (31, 47, 48, 100, 103, 109, 110, 115, 116, 11
     182, 183, 184, 185, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 219, 250, 251);
 
 my %CONFIG_DEFAULTS = (
-    easee => { username => '', password => '', chargers => [] },
+    # dynamic_current_interval_s: Mindestabstand (s) zwischen ERHOEHUNGEN von
+    # set/dynamic_current, Absenkungen/0 immer sofort - siehe daemon/internal/
+    # bridge/throttle.go. 0 = Drosselung aus.
+    easee => { username => '', password => '', chargers => [], dynamic_current_interval_s => 30 },
     mqtt  => {
         use_local_broker => JSON::PP::true,
         host => '', port => 1883, username => '', password => '',
